@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<title>UroLink 연차관리</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%230B1220'/%3E%3Cpath d='M50 26v48M26 50h48' stroke='%2342A5F5' stroke-width='13' stroke-linecap='round'/%3E%3C/svg%3E">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<link href="app.css?v=20260826a" rel="stylesheet">
+<script src="config.js?v=20260826a"></script>
+</head>
+<body>
+
+<!-- ══════════ 로그인 화면 ══════════ -->
+<div id="login-screen">
+  <div id="login-card">
+    <div class="lg-brand">
+      <div>
+        <div style="font-size:24px;font-weight:800;letter-spacing:-.5px">
+          <span class="wm-a">Uro</span><span class="wm-b">LinK</span></div>
+        <div style="font-size:11px;color:#94a3b8">연차관리 시스템</div>
+      </div>
+    </div>
+    <div id="lg-msg"></div>
+    <div class="lg-field">
+      <label>이메일</label>
+      <input type="email" id="lg-email" class="form-control" autocomplete="username" placeholder="name@urolink.co.kr">
+    </div>
+    <div class="lg-field">
+      <label>비밀번호</label>
+      <input type="password" id="lg-pw" class="form-control" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="btn btn-primary w-100" id="lg-btn" onclick="doLogin()" style="font-weight:700;padding:10px">로그인</button>
+    <div class="lg-foot">계정이 없으신가요? 관리자에게 문의해주세요.<br>(CRM과 같은 이메일/비밀번호를 씁니다)</div>
+  </div>
+</div>
+
+<div id="update-bar">
+  <i class="bi bi-arrow-repeat"></i><span>새 버전이 있습니다</span>
+  <button onclick="applyUpdate()">새로고침</button>
+  <button class="ub-later" onclick="$('update-bar').classList.remove('on')">나중에</button>
+</div>
+<div id="sync-badge"><i class="bi bi-arrow-repeat"></i><span id="sync-badge-text"></span></div>
+<div id="toast"><span id="toast-msg"></span></div>
+
+<!-- ══════════ 사이드바 ══════════ -->
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <div>
+      <div class="brand-name"><span class="wm-a">Uro</span><span class="wm-b">LinK</span></div>
+      <div class="brand-sub">연차관리 시스템</div>
+    </div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">메뉴</div>
+    <div class="nav-link" data-page="dashboard" onclick="showPage('dashboard')"><i class="bi bi-grid-1x2"></i>대시보드</div>
+    <div class="nav-link" data-page="apply" onclick="showPage('apply')"><i class="bi bi-calendar-plus"></i>연차 신청</div>
+    <div class="nav-link" data-page="calendar" onclick="showPage('calendar')"><i class="bi bi-calendar3"></i>팀 캘린더</div>
+    <div class="nav-link" id="nav-approvals" data-page="approvals" onclick="showPage('approvals')"><i class="bi bi-check2-square"></i>승인 관리</div>
+    <div class="nav-link" id="nav-employees" data-page="employees" onclick="showPage('employees')"><i class="bi bi-people"></i>직원 관리</div>
+  </div>
+  <div class="sidebar-footer">
+    <div id="account-box" style="padding:10px 12px;font-size:12px;color:#64748b"></div>
+    <div class="nav-link" onclick="doLogout()"><i class="bi bi-box-arrow-right"></i>로그아웃</div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- ══════════ 대시보드 ══════════ -->
+  <div class="page" id="page-dashboard">
+    <div class="wt-mast">
+      <div><div class="kick">Dashboard</div><div class="t"><i class="bi bi-grid-1x2"></i> 대시보드</div></div>
+    </div>
+    <div class="wt-band" id="dash-band"></div>
+    <div class="card-ul">
+      <div class="wt-st">이번 달 팀 휴가자</div>
+      <div id="dash-month-list"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ 연차 신청 ══════════ -->
+  <div class="page" id="page-apply">
+    <div class="wt-mast">
+      <div><div class="kick">Apply</div><div class="t"><i class="bi bi-calendar-plus"></i> 연차 신청</div></div>
+      <button class="btn btn-primary" onclick="openApplyModal()"><i class="bi bi-plus-lg"></i> 새 신청</button>
+    </div>
+    <div class="card-ul">
+      <div class="wt-st">내 신청 내역</div>
+      <div style="overflow-x:auto">
+        <table class="tbl-ul" id="my-leaves-tbl">
+          <thead><tr><th>구분</th><th>기간</th><th>일수</th><th>사유</th><th>상태</th><th></th></tr></thead>
+          <tbody id="my-leaves-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 팀 캘린더 ══════════ -->
+  <div class="page" id="page-calendar">
+    <div class="wt-mast">
+      <div><div class="kick">Calendar</div><div class="t"><i class="bi bi-calendar3"></i> 팀 캘린더</div></div>
+    </div>
+    <div class="card-ul">
+      <div class="cal-head">
+        <button class="btn btn-sm btn-outline-secondary" onclick="calMove(-1)"><i class="bi bi-chevron-left"></i></button>
+        <div style="font-size:16px;font-weight:800" id="cal-title"></div>
+        <button class="btn btn-sm btn-outline-secondary" onclick="calMove(1)"><i class="bi bi-chevron-right"></i></button>
+      </div>
+      <div class="cal-grid" id="cal-dow"></div>
+      <div class="cal-grid" id="cal-grid" style="margin-top:6px"></div>
+    </div>
+  </div>
+
+  <!-- ══════════ 승인 관리 (관리자) ══════════ -->
+  <div class="page" id="page-approvals">
+    <div class="wt-mast">
+      <div><div class="kick">Approvals</div><div class="t"><i class="bi bi-check2-square"></i> 승인 관리</div></div>
+    </div>
+    <div class="card-ul">
+      <div class="wt-st">대기중인 신청</div>
+      <div style="overflow-x:auto">
+        <table class="tbl-ul" id="pending-tbl">
+          <thead><tr><th>신청자</th><th>구분</th><th>기간</th><th>일수</th><th>사유</th><th>신청일</th><th style="width:170px"></th></tr></thead>
+          <tbody id="pending-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-ul">
+      <div class="wt-st">처리 이력</div>
+      <div style="overflow-x:auto">
+        <table class="tbl-ul" id="decided-tbl">
+          <thead><tr><th>신청자</th><th>구분</th><th>기간</th><th>일수</th><th>상태</th><th>처리자</th><th>처리일</th></tr></thead>
+          <tbody id="decided-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════ 직원 관리 (관리자) ══════════ -->
+  <div class="page" id="page-employees">
+    <div class="wt-mast">
+      <div><div class="kick">Employees</div><div class="t"><i class="bi bi-people"></i> 직원 관리</div></div>
+    </div>
+    <div class="card-ul" style="font-size:12.5px;color:#64748b;line-height:1.7">
+      새 직원 로그인 계정은 Supabase 대시보드 → Authentication → Users 에서 관리자가 직접 만듭니다.
+      여기서는 입사일과 연차 수동 조정, 관리자 권한, 계정 활성 여부만 관리합니다.
+    </div>
+    <div class="card-ul">
+      <div style="overflow-x:auto">
+        <table class="tbl-ul" id="emp-tbl">
+          <thead><tr><th>이름</th><th>이메일</th><th>권한</th><th>입사일</th><th>올해 잔여</th><th>수동조정</th><th>상태</th><th style="width:80px"></th></tr></thead>
+          <tbody id="emp-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══════════ 연차 신청 모달 ══════════ -->
+<div class="modal fade" id="modal-apply" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">연차 신청</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="form-label">구분</label>
+          <select id="ap-type" class="form-select" onchange="applyTypeChange()">
+            <option value="연차">연차</option>
+            <option value="오전반차">오전반차</option>
+            <option value="오후반차">오후반차</option>
+          </select>
+        </div>
+        <div class="row g-2 mb-2">
+          <div class="col">
+            <label class="form-label">시작일</label>
+            <input type="date" id="ap-start" class="form-control" onchange="applyDaysRecalc()">
+          </div>
+          <div class="col" id="ap-end-wrap">
+            <label class="form-label">종료일</label>
+            <input type="date" id="ap-end" class="form-control" onchange="applyDaysRecalc()">
+          </div>
+        </div>
+        <div class="mb-2" style="font-size:12.5px;color:#64748b">신청 일수: <b id="ap-days-view">0</b>일 · 올해 잔여: <b id="ap-remain-view">-</b>일</div>
+        <div class="mb-2">
+          <label class="form-label">사유</label>
+          <textarea id="ap-reason" class="form-control" rows="2" placeholder="선택 입력"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-primary" onclick="submitApply()">신청</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 직원 편집 모달 ══════════ -->
+<div class="modal fade" id="modal-emp" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">직원 정보 수정</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="em-id">
+        <div class="mb-2"><label class="form-label">이름</label><div id="em-name" style="font-weight:700"></div></div>
+        <div class="mb-2">
+          <label class="form-label">입사일</label>
+          <input type="date" id="em-hire" class="form-control">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">수동 조정일수 (이월·차감 등, 음수 가능)</label>
+          <input type="number" id="em-adjust" class="form-control" step="0.5">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">권한</label>
+          <select id="em-role" class="form-select">
+            <option value="user">일반</option>
+            <option value="admin">관리자</option>
+          </select>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="em-active">
+          <label class="form-check-label" for="em-active">계정 활성 (끄면 로그인·데이터 접근 차단)</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+        <button class="btn btn-primary" onclick="saveEmp()">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="app.js?v=20260826a"></script>
+</body>
+</html>

@@ -1,0 +1,117 @@
+/* ══════════════════════════════════════════════════════════════
+   UroLink 연차관리 — 디자인 시스템
+   CRM(UroLink CRM)과 같은 톤(문서형 테마, 틸-블루 CI)을 이어갑니다.
+   ══════════════════════════════════════════════════════════════ */
+:root{
+  --blue:#0e7490;--blue-dark:#0b5c73;--blue-light:#ecfeff;
+  --sidebar-bg:#f1f5f9;--sidebar-hover:#eef2f7;--sidebar-active:#e6f4f8;
+  --text:#111827;--text-2:#64748b;--border:#e4e8ef;--bg:#f3f4f6;--white:#fff;
+  --green:#16a34a;--orange:#ea580c;--purple:#7c3aed;--red:#dc2626;
+  --ink:#16324f;--ci-dark:#0B1220;--ci-blue:#42A5F5;
+}
+*{box-sizing:border-box}
+html{color-scheme:only light}
+body{display:flex;min-height:100vh;background:var(--bg);font-family:'Noto Sans KR',sans-serif;margin:0;color:var(--text);font-size:14px}
+.main table{font-variant-numeric:tabular-nums}
+body.locked{overflow:hidden}
+
+/* ── 사이드바 ── */
+.sidebar{width:220px;background:var(--sidebar-bg);min-height:100vh;flex-shrink:0;position:fixed;top:0;left:0;bottom:0;z-index:100;overflow-y:auto;display:flex;flex-direction:column;border-right:1px solid #d8e0ea;box-shadow:3px 0 16px rgba(16,42,67,.06)}
+.main{flex:1;margin-left:220px;padding:28px 32px 80px;overflow-y:auto;min-height:100vh}
+.sidebar-brand{padding:22px 20px 16px;color:#1c2534;display:flex;align-items:center;gap:10px;border-bottom:1px solid #e4e8ef}
+.brand-name{font-size:21px;font-weight:800;letter-spacing:-.6px;line-height:1.1}
+.wm-a{color:var(--ci-dark)}.wm-b{color:var(--ci-blue)}
+.brand-sub{font-size:10.5px;color:#94a3b8;margin-top:1px;letter-spacing:.02em}
+.nav-section{padding:12px 0}
+.nav-label{padding:6px 20px;font-size:10px;font-weight:600;letter-spacing:.08em;color:#475569;text-transform:uppercase}
+.sidebar .nav-link{color:#475569;padding:8px 18px;font-size:13px;font-weight:500;display:flex;align-items:center;gap:9px;cursor:pointer;transition:all .15s;margin:1px 8px;border-radius:6px}
+.sidebar .nav-link i{font-size:15px;width:18px;text-align:center;flex-shrink:0}
+.sidebar .nav-link:hover{color:#1c2534;background:var(--sidebar-hover)}
+.sidebar .nav-link.active{color:var(--blue);background:var(--sidebar-active);font-weight:600}
+.sidebar .nav-link.active i{color:var(--blue)}
+.sidebar-footer{margin-top:auto;padding:12px 8px;border-top:1px solid #e4e8ef}
+.page{display:none}
+.page.active{display:block;animation:fadeIn .22s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── 문서형 마스트헤드 / 히어로 밴드 ── */
+.wt-mast{padding-bottom:13px;border-bottom:2px solid var(--ink);margin-bottom:18px;display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px}
+.wt-mast .kick{font-size:11px;font-weight:800;letter-spacing:.14em;color:#94a3b8;text-transform:uppercase}
+.wt-mast .t{font-size:22px;font-weight:800;color:#182230;letter-spacing:-.01em;margin-top:4px}
+.wt-mast .t i{color:var(--blue)}
+.wt-band{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:stretch;
+  background:#fff;border:1px solid var(--border);border-radius:14px;padding:15px 18px;margin-bottom:14px}
+.wt-hero{grid-column:span 2;padding-right:16px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+.wt-hero .l{font-size:12.5px;font-weight:700;color:#475569}
+.wt-hero>b{font-size:33px;font-weight:800;color:var(--blue);letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.wt-hero .s{font-size:12.5px;color:var(--text-2);margin-top:3px}
+.wt-fact{padding:2px 0 2px 14px;border-left:1px solid var(--border);display:flex;flex-direction:column;justify-content:center;min-width:0}
+.wt-fact .l{font-size:12px;font-weight:700;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wt-fact b{font-size:21px;font-weight:800;color:#182230;font-variant-numeric:tabular-nums;white-space:nowrap;margin-top:2px}
+.wt-fact .s{font-size:11.5px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wt-fact b.rd{color:var(--red)}.wt-fact b.gr{color:#15803d}
+.wt-st{font-size:14px;font-weight:800;color:#182230;padding-bottom:8px;border-bottom:2px solid var(--ink);margin-bottom:12px}
+@media(max-width:900px){
+  .wt-band{grid-auto-flow:row;grid-template-columns:1fr 1fr;gap:12px 10px}
+  .wt-hero{grid-column:1/-1;padding-right:0;border-bottom:1px solid var(--border);padding-bottom:10px}
+  .wt-fact{border-left:0!important;padding:0}
+  .wt-hero>b{font-size:27px}
+}
+
+/* ── 카드 / 테이블 ── */
+.card-ul{background:#fff;border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+table.tbl-ul{width:100%;border-collapse:collapse;font-size:13px}
+table.tbl-ul th{text-align:left;font-size:11.5px;font-weight:700;color:#64748b;padding:8px 10px;border-bottom:2px solid var(--ink);white-space:nowrap}
+table.tbl-ul td{padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:middle}
+table.tbl-ul tr:hover td{background:#fafbfc}
+
+/* ── 뱃지 ── */
+.badge-st{display:inline-block;padding:3px 9px;border-radius:20px;font-size:11.5px;font-weight:700}
+.badge-st.wait{background:#fef3c7;color:#92400e}
+.badge-st.ok{background:#dcfce7;color:#15803d}
+.badge-st.no{background:#fee2e2;color:#b91c1c}
+.badge-admin{background:#ede9fe;color:#6d28d9;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:6px}
+
+/* ── 팀 캘린더 ── */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:6px}
+.cal-dow{font-size:11px;font-weight:700;color:#94a3b8;text-align:center;padding-bottom:4px}
+.cal-cell{min-height:86px;border:1px solid var(--border);border-radius:8px;padding:6px;background:#fff}
+.cal-cell.other{background:#fafbfc;color:#cbd5e1}
+.cal-cell.today{border-color:var(--blue);box-shadow:0 0 0 1px var(--blue) inset}
+.cal-cell .d{font-size:11.5px;font-weight:700;color:#475569;margin-bottom:4px}
+.cal-tag{display:block;font-size:10.5px;font-weight:600;color:#0b5c73;background:var(--blue-light);border-radius:5px;padding:1px 5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:900px){.cal-grid{grid-template-columns:repeat(7,minmax(0,1fr));gap:3px}.cal-cell{min-height:60px;padding:3px}.cal-tag{font-size:9px}}
+
+/* ── 로그인 화면 ── */
+#login-screen{position:fixed;inset:0;z-index:5000;background:#0f172a;display:none;align-items:center;justify-content:center;padding:20px}
+#login-screen.on{display:flex}
+#login-card{width:100%;max-width:380px;background:#fff;border-radius:18px;padding:30px 28px;box-shadow:0 24px 60px rgba(0,0,0,.4)}
+#login-card .lg-brand{display:flex;align-items:center;gap:11px;margin-bottom:24px}
+#login-card .lg-field{margin-bottom:14px}
+#login-card .lg-field label{font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;display:block}
+#login-card .lg-foot{font-size:11.5px;color:#94a3b8;margin-top:16px;text-align:center;line-height:1.6}
+#lg-msg{font-size:12.5px;min-height:18px;margin-bottom:8px}
+
+/* ── 토스트 / 동기화 배지 ── */
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);background:#1e293b;color:#fff;
+  padding:10px 20px;border-radius:10px;font-size:13px;font-weight:600;opacity:0;pointer-events:none;transition:all .25s;z-index:9000}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#sync-badge{position:fixed;bottom:24px;left:24px;background:#1e293b;color:#e2e8f0;padding:8px 14px;border-radius:10px;
+  font-size:12px;font-weight:600;display:none;align-items:center;gap:7px;z-index:8900;box-shadow:0 8px 20px rgba(0,0,0,.25)}
+#sync-badge.show{display:flex}
+#sync-badge i{font-size:13px}
+#sync-badge.syncing i{animation:sb-spin .8s linear infinite}
+#sync-badge.done{background:#166534}
+@keyframes sb-spin{to{transform:rotate(360deg)}}
+
+#update-bar{position:fixed;left:50%;transform:translateX(-50%) translateY(-140%);top:12px;z-index:10500;
+  background:#0f172a;color:#e2e8f0;padding:9px 16px;border-radius:12px;font-size:12.5px;font-weight:600;
+  display:flex;align-items:center;gap:10px;box-shadow:0 10px 30px rgba(0,0,0,.35);transition:transform .25s}
+#update-bar.on{transform:translateX(-50%) translateY(0)}
+#update-bar i{color:#5eead4;font-size:15px}
+#update-bar button{background:var(--blue);border:0;color:#fff;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer}
+#update-bar button:hover{background:var(--blue-dark)}
+#update-bar button.ub-later{background:none;border:1px solid #475569;color:#94a3b8;font-weight:500}
+
+.empty-ul{padding:32px 10px;text-align:center;color:#94a3b8;font-size:13px}
