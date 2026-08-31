@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831k';
+const APP_VERSION = '20260831l';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -310,11 +310,16 @@ function renderDashboard() {
 }
 
 /* ───────────────────────── 8. 연차 신청 ───────────────────────── */
-function openApplyModal() {
-  $('ap-type').value = '연차';
-  $('ap-start').value = today();
-  $('ap-end').value = today();
-  $('ap-reason').value = '';
+let EDITING_LEAVE_ID = null;
+function openApplyModal(editId) {
+  const editing = editId && (DB.leaves || []).find(l => l.id === editId && l.requesterId === ME.id && l.status === '대기');
+  EDITING_LEAVE_ID = editing ? editing.id : null;
+  $('apply-modal-title').textContent = editing ? '연차 신청 수정' : '연차 신청';
+  $('apply-submit-btn').textContent = editing ? '저장' : '신청';
+  $('ap-type').value = editing ? editing.type : '연차';
+  $('ap-start').value = editing ? editing.startDate : today();
+  $('ap-end').value = editing ? editing.endDate : today();
+  $('ap-reason').value = editing ? (editing.reason || '') : '';
   applyTypeChange();
   new bootstrap.Modal($('modal-apply')).show();
 }
@@ -347,13 +352,27 @@ function submitApply() {
   if (end < start) return alert('종료일이 시작일보다 빠를 수 없습니다.');
   const days = half ? 0.5 : countWeekdays(start, end);
   if (days <= 0) return alert('평일이 포함된 기간을 선택해주세요.');
+  const reason = $('ap-reason').value.trim();
+
+  if (EDITING_LEAVE_ID) {
+    const l = (DB.leaves || []).find(x => x.id === EDITING_LEAVE_ID);
+    if (!l || l.status !== '대기') { alert('이미 처리된 신청은 수정할 수 없습니다.'); return; }
+    l.type = type; l.startDate = start; l.endDate = end; l.days = days; l.reason = reason;
+    save();
+    EDITING_LEAVE_ID = null;
+    bootstrap.Modal.getInstance($('modal-apply')).hide();
+    renderMyLeaves();
+    toast('수정되었습니다');
+    return;
+  }
+
   DB.leaves = DB.leaves || [];
   const createdAt = new Date().toISOString();
   const newLeave = {
     id: uid(), docNo: genDocNo(createdAt),
     requesterId: ME.id, requesterName: ME.display_name || ME.email, requesterDept: ME.department || '', requesterTitle: ME.job_title || '', requesterPhone: ME.phone || '',
     type, startDate: start, endDate: end, days,
-    reason: $('ap-reason').value.trim(), status: '대기',
+    reason, status: '대기',
     decidedBy: '', decidedTitle: '', decidedAt: '', rejectReason: '', createdAt
   };
   DB.leaves.push(newLeave);
@@ -367,7 +386,9 @@ function renderMyLeaves() {
   const rows = (DB.leaves || []).filter(l => l.requesterId === ME.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   $('my-leaves-body').innerHTML = rows.length ? rows.map(l => `
     <tr>
-      <td>${esc(l.type)}</td>
+      <td>${l.status === '대기'
+        ? `<a href="#" onclick="event.preventDefault();openApplyModal('${l.id}')" style="color:var(--blue);text-decoration:underline;font-weight:600" title="클릭해서 수정">${esc(l.type)}</a>`
+        : esc(l.type)}</td>
       <td>${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''}</td>
       <td>${l.days}일</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.reason || '-')}</td>
@@ -564,7 +585,7 @@ function decideLeave(id, decision) {
   row.status = decision; row.decidedBy = ME.display_name || ME.email; row.decidedTitle = ME.job_title || '';
   row.decidedAt = new Date().toISOString(); row.rejectReason = reason;
   save();
-  if (decision === '승인') notifyRequesterOfDecision(row);
+  notifyRequesterOfDecision(row);
   renderApprovals(); renderDashboard();
 }
 /* 잘못 승인/반려한 건을 대기 상태로 되돌린다.
