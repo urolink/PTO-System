@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831b';
+const APP_VERSION = '20260831c';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -318,7 +318,10 @@ function renderMyLeaves() {
       <td>${l.days}일</td>
       <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.reason || '-')}</td>
       <td>${stBadge(l.status)}${l.status === '반려' && l.rejectReason ? `<div style="font-size:11px;color:#94a3b8;margin-top:2px">${esc(l.rejectReason)}</div>` : ''}</td>
-      <td>${l.status === '대기' ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelLeave('${l.id}')">취소</button>` : ''}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-outline-secondary" onclick="openLeaveForm('${l.id}')" title="신청서 보기/인쇄"><i class="bi bi-printer"></i></button>
+        ${l.status === '대기' ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelLeave('${l.id}')">취소</button>` : ''}
+      </td>
     </tr>`).join('') : `<tr><td colspan="6" class="empty-ul">신청 내역이 없습니다</td></tr>`;
 }
 function stBadge(s) {
@@ -332,6 +335,53 @@ function cancelLeave(id) {
   DB.leaves = DB.leaves.filter(l => l.id !== id);
   save();
   renderMyLeaves(); renderDashboard();
+}
+
+/* ───────────────────────── 8-1. 연차 신청서 (인쇄 / PDF 저장) ─────────────────────────
+   별도 다운로드 라이브러리 없이, 새 창에 인쇄용 문서를 그려서
+   브라우저 인쇄 대화상자의 "PDF로 저장"을 파일 다운로드로 쓴다. */
+function leaveFormHtml(l) {
+  const p = (PROFILES || []).find(x => x.id === l.requesterId) || {};
+  return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
+<title>연차신청서 - ${esc(l.requesterName)}</title>
+<style>
+  body{font-family:'Malgun Gothic','Noto Sans KR',sans-serif;padding:48px;color:#111;max-width:640px;margin:0 auto}
+  h1{text-align:center;font-size:22px;letter-spacing:10px;border-bottom:3px double #111;padding-bottom:16px;margin-bottom:32px}
+  table{width:100%;border-collapse:collapse;margin-bottom:28px}
+  td,th{border:1px solid #333;padding:10px 12px;font-size:14px;vertical-align:top}
+  th{background:#f3f4f6;width:110px;text-align:left;font-weight:700}
+  .reason{min-height:56px;white-space:pre-wrap}
+  .sign-row{display:flex;justify-content:flex-end;gap:48px;margin-top:60px;font-size:14px}
+  .sign-box{text-align:center;color:#333}
+  .sign-line{margin-top:44px;border-top:1px solid #333;width:150px}
+  .toolbar{text-align:center;margin-bottom:28px}
+  .toolbar button{padding:9px 20px;font-size:13px;font-weight:700;border:1px solid #0e7490;background:#0e7490;color:#fff;border-radius:6px;cursor:pointer}
+  @media print{ .toolbar{display:none} body{padding:0} }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">인쇄 / PDF로 저장</button></div>
+<h1>연 차 신 청 서</h1>
+<table>
+  <tr><th>성명</th><td>${esc(l.requesterName)}</td><th>이메일</th><td>${esc(p.email || '-')}</td></tr>
+  <tr><th>구분</th><td colspan="3">${esc(l.type)}</td></tr>
+  <tr><th>기간</th><td colspan="3">${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)</td></tr>
+  <tr><th>사유</th><td colspan="3" class="reason">${esc(l.reason || '-')}</td></tr>
+  <tr><th>신청일</th><td>${fmtDate(l.createdAt)}</td><th>상태</th><td>${esc(l.status)}</td></tr>
+  ${l.status !== '대기' ? `<tr><th>처리자</th><td>${esc(l.decidedBy || '-')}</td><th>처리일</th><td>${fmtDate(l.decidedAt)}</td></tr>` : ''}
+  ${l.status === '반려' && l.rejectReason ? `<tr><th>반려 사유</th><td colspan="3">${esc(l.rejectReason)}</td></tr>` : ''}
+</table>
+<div class="sign-row">
+  <div class="sign-box">신청자<div class="sign-line"></div></div>
+  <div class="sign-box">승인자<div class="sign-line"></div></div>
+</div>
+</body></html>`;
+}
+function openLeaveForm(id) {
+  const l = (DB.leaves || []).find(x => x.id === id);
+  if (!l) return;
+  const w = window.open('', '_blank');
+  if (!w) { alert('팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도해주세요.'); return; }
+  w.document.write(leaveFormHtml(l));
+  w.document.close();
 }
 
 /* ───────────────────────── 9. 팀 캘린더 ───────────────────────── */
@@ -390,7 +440,8 @@ function renderApprovals() {
       <td>${stBadge(l.status)}</td>
       <td>${esc(l.decidedBy || '-')}</td>
       <td>${fmtDate(l.decidedAt)}</td>
-    </tr>`).join('') : `<tr><td colspan="7" class="empty-ul">처리 이력이 없습니다</td></tr>`;
+      <td><button class="btn btn-sm btn-outline-secondary" onclick="openLeaveForm('${l.id}')" title="신청서 보기/인쇄"><i class="bi bi-printer"></i></button></td>
+    </tr>`).join('') : `<tr><td colspan="8" class="empty-ul">처리 이력이 없습니다</td></tr>`;
 }
 function decideLeave(id, decision) {
   if (!isAdmin()) return;
