@@ -48,8 +48,13 @@ function wrap76(b64: string): string {
   return lines.join('\r\n');
 }
 
+/* 사람 이름이 들어가는 헤더(From 표시이름 등)의 한글 인코딩 */
+function encodeWord(s: string): string {
+  return `=?UTF-8?B?${toB64(s)}?=`;
+}
+
 /* ── 아주 작은 SMTP 클라이언트 (AUTH LOGIN + TLS, Gmail/워크스페이스용) ── */
-async function smtpSend(opts: { from: string; to: string[]; subject: string; html: string; user: string; pass: string }) {
+async function smtpSend(opts: { from: string; fromName?: string; replyTo?: string; to: string[]; subject: string; html: string; user: string; pass: string }) {
   const conn = await Deno.connectTls({ hostname: 'smtp.gmail.com', port: 465 });
   const enc = new TextEncoder();
   const dec = new TextDecoder();
@@ -100,11 +105,15 @@ async function smtpSend(opts: { from: string; to: string[]; subject: string; htm
     r = await cmd('DATA');
     if (!r.startsWith('354')) throw new Error('DATA 실패: ' + r);
 
-    const subjectHeader = `=?UTF-8?B?${toB64(opts.subject)}?=`;
+    const subjectHeader = encodeWord(opts.subject);
+    // 실제 발신 주소는 인증된 시스템 계정 그대로 두고(안 그러면 SPF/DKIM 검증에 걸려
+    // 스팸으로 분류되거나 거부된다), 표시 이름만 "신청자/처리자 이름"으로 보이게 한다.
+    const fromHeader = opts.fromName ? `${encodeWord(opts.fromName)} <${opts.from}>` : opts.from;
     const bodyB64 = wrap76(toB64(opts.html));
     const message =
-      `From: ${opts.from}\r\n` +
+      `From: ${fromHeader}\r\n` +
       `To: ${opts.to.join(', ')}\r\n` +
+      (opts.replyTo ? `Reply-To: ${opts.replyTo}\r\n` : '') +
       `Subject: ${subjectHeader}\r\n` +
       `Date: ${new Date().toUTCString()}\r\n` +
       `MIME-Version: 1.0\r\n` +
@@ -147,12 +156,15 @@ Deno.serve(async (req) => {
   if (!me || me.active === false) return json({ error: '접속이 차단된 계정입니다' }, 403);
 
   // ── 2) 요청 처리 ──
-  let body: { to?: string[]; subject?: string; html?: string } = {};
+  let body: { to?: string[]; subject?: string; html?: string; fromName?: string; replyTo?: string } = {};
   try { body = await req.json(); } catch { return json({ error: '잘못된 요청입니다' }, 400); }
 
-  const to = Array.isArray(body.to) ? body.to.filter(a => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(a))).slice(0, 5) : [];
+  const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const to = Array.isArray(body.to) ? body.to.filter(a => EMAIL_RE.test(String(a))).slice(0, 5) : [];
   const subject = String(body.subject ?? '').slice(0, 200);
   const html = String(body.html ?? '').slice(0, 5000);
+  const fromName = String(body.fromName ?? '').slice(0, 80);
+  const replyTo = body.replyTo && EMAIL_RE.test(String(body.replyTo)) ? String(body.replyTo) : '';
   if (!to.length) return json({ error: '받는 사람이 없습니다' }, 400);
   if (!subject || !html) return json({ error: '제목/내용이 없습니다' }, 400);
 
@@ -162,7 +174,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    await smtpSend({ from: SMTP_USER, to, subject, html, user: SMTP_USER, pass: SMTP_PASS });
+    await smtpSend({ from: SMTP_USER, fromName, replyTo, to, subject, html, user: SMTP_USER, pass: SMTP_PASS });
   } catch (e) {
     return json({ error: '메일 발송 실패: ' + (e instanceof Error ? e.message : String(e)) }, 500);
   }

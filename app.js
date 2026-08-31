@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831l';
+const APP_VERSION = '20260831m';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -233,10 +233,10 @@ async function changePassword() {
 /* ── 알림 메일 (send-mail Edge Function 필요 — 없거나 실패해도 조용히 무시) ──
    메일 발송은 사용자 조작을 막으면 안 되는 부가 기능이라 항상 try/catch 로 감싸고,
    실패해도 화면에는 알리지 않는다(콘솔에만 남김). */
-async function sendMail(to, subject, html) {
+async function sendMail(to, subject, html, fromName, replyTo) {
   if (!isRemote() || !SB || !to.length) return;
   try {
-    const { error } = await SB.functions.invoke('send-mail', { body: { to, subject, html } });
+    const { error } = await SB.functions.invoke('send-mail', { body: { to, subject, html, fromName, replyTo } });
     if (error) console.warn('[메일 발송 실패]', error);
   } catch (e) { console.warn('[메일 발송 실패]', e); }
 }
@@ -244,10 +244,12 @@ function appLink() { return location.origin + location.pathname; }
 function notifyCeoOfSubmission(l) {
   const ceos = (PROFILES || []).filter(p => p.job_title === '대표이사' && p.email && p.active !== false).map(p => p.email);
   if (!ceos.length) return;
+  const requester = (PROFILES || []).find(p => p.id === l.requesterId);
   const html = `<p>${esc(l.requesterName)}${l.requesterDept ? ' (' + esc(l.requesterDept) + ')' : ''}님이 휴가를 신청했습니다.</p>
     <p>구분: ${esc(l.type)}<br>기간: ${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)<br>사유: ${esc(l.reason || '-')}</p>
     <p><a href="${esc(appLink())}">연차관리 시스템에서 확인하기</a></p>`;
-  sendMail(ceos, `[연차신청] ${l.requesterName} · ${l.type} 승인 요청`, html);
+  sendMail(ceos, `[연차신청] ${l.requesterName} · ${l.type} 승인 요청`, html,
+    `${l.requesterName} (연차관리 시스템)`, requester ? requester.email : '');
 }
 function notifyRequesterOfDecision(l) {
   const p = (PROFILES || []).find(x => x.id === l.requesterId);
@@ -257,7 +259,8 @@ function notifyRequesterOfDecision(l) {
     <p>구분: ${esc(l.type)}<br>기간: ${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)<br>처리자: ${esc(l.decidedBy || '-')}</p>
     ${!ok && l.rejectReason ? `<p>반려 사유: ${esc(l.rejectReason)}</p>` : ''}
     <p><a href="${esc(appLink())}">연차관리 시스템에서 확인하기</a></p>`;
-  sendMail([p.email], `[연차${ok ? '승인' : '반려'}] ${l.type} ${fmtDate(l.startDate)}`, html);
+  sendMail([p.email], `[연차${ok ? '승인' : '반려'}] ${l.type} ${fmtDate(l.startDate)}`, html,
+    `${l.decidedBy || '연차관리 시스템'} (연차관리 시스템)`, l.decidedByEmail || '');
 }
 
 /* ───────────────────────── 6. 라우팅 ───────────────────────── */
@@ -582,7 +585,7 @@ function decideLeave(id, decision) {
   if (decision === '반려') {
     reason = prompt('반려 사유를 입력해주세요(선택):') || '';
   }
-  row.status = decision; row.decidedBy = ME.display_name || ME.email; row.decidedTitle = ME.job_title || '';
+  row.status = decision; row.decidedBy = ME.display_name || ME.email; row.decidedTitle = ME.job_title || ''; row.decidedByEmail = ME.email || '';
   row.decidedAt = new Date().toISOString(); row.rejectReason = reason;
   save();
   notifyRequesterOfDecision(row);
@@ -595,7 +598,7 @@ function undecideLeave(id) {
   const row = (DB.leaves || []).find(l => l.id === id);
   if (!row) return;
   if (!confirm(`${row.requesterName}님의 ${row.type} 신청(${row.status})을 대기중으로 되돌릴까요?`)) return;
-  row.status = '대기'; row.decidedBy = ''; row.decidedTitle = ''; row.decidedAt = ''; row.rejectReason = '';
+  row.status = '대기'; row.decidedBy = ''; row.decidedTitle = ''; row.decidedByEmail = ''; row.decidedAt = ''; row.rejectReason = '';
   save();
   renderApprovals(); renderDashboard();
 }
