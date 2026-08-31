@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831j';
+const APP_VERSION = '20260831k';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -230,6 +230,36 @@ async function changePassword() {
   toast('비밀번호가 변경되었습니다');
 }
 
+/* ── 알림 메일 (send-mail Edge Function 필요 — 없거나 실패해도 조용히 무시) ──
+   메일 발송은 사용자 조작을 막으면 안 되는 부가 기능이라 항상 try/catch 로 감싸고,
+   실패해도 화면에는 알리지 않는다(콘솔에만 남김). */
+async function sendMail(to, subject, html) {
+  if (!isRemote() || !SB || !to.length) return;
+  try {
+    const { error } = await SB.functions.invoke('send-mail', { body: { to, subject, html } });
+    if (error) console.warn('[메일 발송 실패]', error);
+  } catch (e) { console.warn('[메일 발송 실패]', e); }
+}
+function appLink() { return location.origin + location.pathname; }
+function notifyCeoOfSubmission(l) {
+  const ceos = (PROFILES || []).filter(p => p.job_title === '대표이사' && p.email && p.active !== false).map(p => p.email);
+  if (!ceos.length) return;
+  const html = `<p>${esc(l.requesterName)}${l.requesterDept ? ' (' + esc(l.requesterDept) + ')' : ''}님이 휴가를 신청했습니다.</p>
+    <p>구분: ${esc(l.type)}<br>기간: ${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)<br>사유: ${esc(l.reason || '-')}</p>
+    <p><a href="${esc(appLink())}">연차관리 시스템에서 확인하기</a></p>`;
+  sendMail(ceos, `[연차신청] ${l.requesterName} · ${l.type} 승인 요청`, html);
+}
+function notifyRequesterOfDecision(l) {
+  const p = (PROFILES || []).find(x => x.id === l.requesterId);
+  if (!p || !p.email) return;
+  const ok = l.status === '승인';
+  const html = `<p>신청하신 휴가가 <b>${ok ? '승인' : '반려'}</b>되었습니다.</p>
+    <p>구분: ${esc(l.type)}<br>기간: ${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)<br>처리자: ${esc(l.decidedBy || '-')}</p>
+    ${!ok && l.rejectReason ? `<p>반려 사유: ${esc(l.rejectReason)}</p>` : ''}
+    <p><a href="${esc(appLink())}">연차관리 시스템에서 확인하기</a></p>`;
+  sendMail([p.email], `[연차${ok ? '승인' : '반려'}] ${l.type} ${fmtDate(l.startDate)}`, html);
+}
+
 /* ───────────────────────── 6. 라우팅 ───────────────────────── */
 const PAGES = ['dashboard', 'apply', 'calendar', 'approvals', 'employees'];
 function showPage(p) {
@@ -319,14 +349,16 @@ function submitApply() {
   if (days <= 0) return alert('평일이 포함된 기간을 선택해주세요.');
   DB.leaves = DB.leaves || [];
   const createdAt = new Date().toISOString();
-  DB.leaves.push({
+  const newLeave = {
     id: uid(), docNo: genDocNo(createdAt),
     requesterId: ME.id, requesterName: ME.display_name || ME.email, requesterDept: ME.department || '', requesterTitle: ME.job_title || '', requesterPhone: ME.phone || '',
     type, startDate: start, endDate: end, days,
     reason: $('ap-reason').value.trim(), status: '대기',
     decidedBy: '', decidedTitle: '', decidedAt: '', rejectReason: '', createdAt
-  });
+  };
+  DB.leaves.push(newLeave);
   save();
+  notifyCeoOfSubmission(newLeave);
   bootstrap.Modal.getInstance($('modal-apply')).hide();
   renderMyLeaves();
   toast('신청되었습니다');
@@ -532,6 +564,7 @@ function decideLeave(id, decision) {
   row.status = decision; row.decidedBy = ME.display_name || ME.email; row.decidedTitle = ME.job_title || '';
   row.decidedAt = new Date().toISOString(); row.rejectReason = reason;
   save();
+  if (decision === '승인') notifyRequesterOfDecision(row);
   renderApprovals(); renderDashboard();
 }
 /* 잘못 승인/반려한 건을 대기 상태로 되돌린다.
