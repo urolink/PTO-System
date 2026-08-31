@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831d';
+const APP_VERSION = '20260831e';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -460,7 +460,10 @@ function renderApprovals() {
       <td>${stBadge(l.status)}</td>
       <td>${esc(l.decidedBy || '-')}</td>
       <td>${fmtDate(l.decidedAt)}</td>
-      <td><button class="btn btn-sm btn-outline-secondary" onclick="openLeaveForm('${l.id}')" title="신청서 보기/인쇄"><i class="bi bi-printer"></i></button></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-outline-secondary" onclick="openLeaveForm('${l.id}')" title="신청서 보기/인쇄"><i class="bi bi-printer"></i></button>
+        <button class="btn btn-sm btn-outline-warning" onclick="undecideLeave('${l.id}')" title="대기중으로 되돌리기">결정 취소</button>
+      </td>
     </tr>`).join('') : `<tr><td colspan="8" class="empty-ul">처리 이력이 없습니다</td></tr>`;
 }
 function decideLeave(id, decision) {
@@ -473,6 +476,17 @@ function decideLeave(id, decision) {
   }
   row.status = decision; row.decidedBy = ME.display_name || ME.email;
   row.decidedAt = new Date().toISOString(); row.rejectReason = reason;
+  save();
+  renderApprovals(); renderDashboard();
+}
+/* 잘못 승인/반려한 건을 대기 상태로 되돌린다.
+   승인 취소 시 잔여 연차·팀 캘린더는 status==='승인' 필터를 쓰므로 자동으로 반영됨. */
+function undecideLeave(id) {
+  if (!isAdmin()) return;
+  const row = (DB.leaves || []).find(l => l.id === id);
+  if (!row) return;
+  if (!confirm(`${row.requesterName}님의 ${row.type} 신청(${row.status})을 대기중으로 되돌릴까요?`)) return;
+  row.status = '대기'; row.decidedBy = ''; row.decidedAt = ''; row.rejectReason = '';
   save();
   renderApprovals(); renderDashboard();
 }
