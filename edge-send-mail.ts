@@ -76,7 +76,10 @@ Deno.serve(async (req) => {
   });
 
   try {
-    await client.send({ from: SMTP_USER, to, subject, html, content: 'auto' });
+    // content(일반 텍스트)+html 을 같이 넣으면 멀티파트(multipart/mixed>alternative)로
+    // 감싸서 보내는데, 일부 메일 프로그램이 이 중첩 구조를 못 풀고 원문 그대로
+    // 보여주는 문제가 있었다. html 단일 파트로만 보내면 구조가 단순해져 호환성이 좋다.
+    await client.send({ from: SMTP_USER, to, subject, html });
   } catch (e) {
     return json({ error: '메일 발송 실패: ' + (e instanceof Error ? e.message : String(e)) }, 500);
   } finally {
