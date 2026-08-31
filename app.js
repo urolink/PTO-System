@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831h';
+const APP_VERSION = '20260831i';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -92,7 +92,7 @@ function loadLocal() {
   catch (e) { DB = null; }
   if (!DB || typeof DB !== 'object') {
     DB = blankDB();
-    ME = { id: 'me', email: 'test@urolink.co.kr', display_name: '테스트관리자', department: '영업팀', job_title: '대리', role: 'admin',
+    ME = { id: 'me', email: 'test@urolink.co.kr', display_name: '테스트관리자', department: '영업팀', job_title: '대리', phone: '010-0000-0000', role: 'admin',
            hire_date: '2022-03-02', adjust_days: 0, active: true };
     DB.employees = [ME];
     save(true);
@@ -161,7 +161,7 @@ async function pushDiff(silent) {
 async function pullRemote() {
   const [lv, pf] = await Promise.all([
     SB.from('ul_leaves').select('id,data'),
-    SB.from('ul_profiles').select('id,email,display_name,department,job_title,role,hire_date,adjust_days,active').order('display_name')
+    SB.from('ul_profiles').select('id,email,display_name,department,job_title,phone,role,hire_date,adjust_days,active').order('display_name')
   ]);
   if (lv.error) { toast('데이터를 불러오지 못했습니다: ' + lv.error.message); DB = blankDB(); }
   else DB = { leaves: (lv.data || []).map(r => Object.assign({ id: r.id }, r.data)), employees: [], meta: { ver: 1 } };
@@ -191,7 +191,7 @@ async function doLogin() {
 
 async function afterLogin(session) {
   const { data: p } = await SB.from('ul_profiles')
-    .select('id,email,display_name,department,job_title,role,hire_date,adjust_days,active').eq('id', session.user.id).maybeSingle();
+    .select('id,email,display_name,department,job_title,phone,role,hire_date,adjust_days,active').eq('id', session.user.id).maybeSingle();
   ME = p || { id: session.user.id, email: session.user.email,
               display_name: String(session.user.email || '').split('@')[0], role: 'user', adjust_days: 0, active: true };
   if (p && p.active === false) {
@@ -321,7 +321,7 @@ function submitApply() {
   const createdAt = new Date().toISOString();
   DB.leaves.push({
     id: uid(), docNo: genDocNo(createdAt),
-    requesterId: ME.id, requesterName: ME.display_name || ME.email, requesterDept: ME.department || '', requesterTitle: ME.job_title || '',
+    requesterId: ME.id, requesterName: ME.display_name || ME.email, requesterDept: ME.department || '', requesterTitle: ME.job_title || '', requesterPhone: ME.phone || '',
     type, startDate: start, endDate: end, days,
     reason: $('ap-reason').value.trim(), status: '대기',
     decidedBy: '', decidedTitle: '', decidedAt: '', rejectReason: '', createdAt
@@ -374,11 +374,16 @@ function leaveFormHtml(l) {
   const decided = l.status !== '대기';
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
 <title>휴가신청서 - ${esc(l.docNo || '')}</title>
+<script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"><\/script>
 <style>
   body{font-family:'Malgun Gothic','Noto Sans KR',sans-serif;color:#111;max-width:720px;margin:0 auto;padding:36px 30px 50px}
-  .toolbar{text-align:center;margin-bottom:26px}
-  .toolbar button{padding:9px 20px;font-size:13px;font-weight:700;border:1px solid #0e7490;background:#0e7490;color:#fff;border-radius:6px;cursor:pointer}
-  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px}
+  .toolbar{text-align:center;margin-bottom:26px;display:flex;gap:8px;justify-content:center}
+  .toolbar button{padding:9px 20px;font-size:13px;font-weight:700;border:1px solid #0e7490;background:#0e7490;color:#fff;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+  .toolbar button.dl{background:#fff;color:#0e7490}
+  .brandmark{position:absolute;top:14px;right:20px;font-size:15px;font-weight:800;letter-spacing:-.4px}
+  .brandmark .a{color:#0B1220}.brandmark .b{color:#42A5F5}
+  #doc-body{position:relative}
+  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;padding-top:18px}
   .doc-title{font-size:27px;font-weight:800;letter-spacing:6px;padding-top:10px}
   .appr{border:1px solid #333;display:flex}
   .appr .lb{writing-mode:vertical-rl;padding:4px 3px;border-right:1px solid #333;font-weight:700;font-size:12.5px;letter-spacing:3px;display:flex;align-items:center;justify-content:center}
@@ -392,9 +397,14 @@ function leaveFormHtml(l) {
   .statement{text-align:center;margin:28px 0 22px;font-size:14px}
   .dateline{text-align:center;font-size:14px;margin-bottom:26px;letter-spacing:3px}
   .company{text-align:center;font-size:17px;font-weight:800;letter-spacing:3px}
-  @media print{ .toolbar{display:none} body{padding:0} }
+  @media print{ .toolbar{display:none} body{padding:0} .brandmark{top:0} }
 </style></head><body>
-<div class="toolbar"><button onclick="window.print()">인쇄 / PDF로 저장</button></div>
+<div class="toolbar">
+  <button onclick="window.print()"><i>🖨</i> 인쇄</button>
+  <button class="dl" onclick="downloadPdf()"><i>⬇</i> 다운로드(PDF)</button>
+</div>
+<div id="doc-body">
+<div class="brandmark"><span class="a">Uro</span><span class="b">LinK</span></div>
 <div class="doc-head">
   <div class="doc-title">휴 가 신 청 서</div>
   <div class="appr">
@@ -414,7 +424,7 @@ function leaveFormHtml(l) {
   </tr>
   <tr>
     <th>직급</th><td>${esc(l.requesterTitle || p.job_title || '-')}</td>
-    <th>연락처</th><td colspan="3">-</td>
+    <th>연락처</th><td colspan="3">${esc(l.requesterPhone || p.phone || '-')}</td>
   </tr>
   <tr><th>휴가구분</th><td colspan="5">${esc(l.type)}</td></tr>
   <tr><th>휴가기간</th><td colspan="5">${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)</td></tr>
@@ -423,6 +433,17 @@ function leaveFormHtml(l) {
 <div class="statement">위와 같이 휴가를 신청하오니 재가하여 주시기 바랍니다.</div>
 <div class="dateline">${String(l.createdAt).slice(0, 4)}년&nbsp;&nbsp;${num(String(l.createdAt).slice(5, 7))}월&nbsp;&nbsp;${num(String(l.createdAt).slice(8, 10))}일</div>
 <div class="company">주식회사 유로링크</div>
+</div>
+<script>
+function downloadPdf(){
+  html2pdf().set({
+    filename: ${JSON.stringify((l.docNo || 'leave-form') + '.pdf')},
+    margin: 10,
+    html2canvas: { scale: 2 },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  }).from(document.getElementById('doc-body')).save();
+}
+<\/script>
 </body></html>`;
 }
 function openLeaveForm(id) {
@@ -535,6 +556,7 @@ function renderEmployees() {
       <td>${esc(p.display_name || '-')}</td>
       <td>${esc(p.department || '-')}</td>
       <td>${esc(p.job_title || '-')}</td>
+      <td>${esc(p.phone || '-')}</td>
       <td>${esc(p.email || '-')}</td>
       <td>${p.role === 'admin' ? '<span class="badge-admin">관리자</span>' : '일반'}</td>
       <td>${p.hire_date ? fmtDate(p.hire_date) : '<span style="color:#cbd5e1">미등록</span>'}</td>
@@ -543,7 +565,7 @@ function renderEmployees() {
       <td>${p.active === false ? '<span class="badge-st no">차단</span>' : '<span class="badge-st ok">활성</span>'}</td>
       <td><button class="btn btn-sm btn-outline-secondary" onclick="openEmpModal('${p.id}')"><i class="bi bi-pencil"></i></button></td>
     </tr>`;
-  }).join('') : `<tr><td colspan="10" class="empty-ul">직원이 없습니다</td></tr>`;
+  }).join('') : `<tr><td colspan="11" class="empty-ul">직원이 없습니다</td></tr>`;
 }
 function openEmpModal(id) {
   const p = PROFILES.find(x => x.id === id); if (!p) return;
@@ -552,6 +574,7 @@ function openEmpModal(id) {
   $('em-name').value = p.display_name || '';
   $('em-dept').value = p.department || '';
   $('em-title').value = p.job_title || '';
+  $('em-phone').value = p.phone || '';
   $('em-hire').value = p.hire_date || '';
   $('em-adjust').value = num(p.adjust_days);
   $('em-role').value = p.role === 'admin' ? 'admin' : 'user';
@@ -566,6 +589,7 @@ async function saveEmp() {
     display_name: name || (p.email || '').split('@')[0],
     department: $('em-dept').value.trim(),
     job_title: $('em-title').value.trim(),
+    phone: $('em-phone').value.trim(),
     hire_date: $('em-hire').value || null,
     adjust_days: num($('em-adjust').value),
     role: $('em-role').value,

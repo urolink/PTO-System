@@ -18,15 +18,17 @@ create table if not exists ul_profiles (
   display_name text,
   department   text,                        -- 부서
   job_title    text,                        -- 직급 (예: 사원/대리/과장/부장) — role(로그인 권한)과는 다른 개념
+  phone        text,                        -- 연락처 (휴가신청서 양식에 자동 기입)
   role         text not null default 'user' check (role in ('admin','user')),
   hire_date    date,                        -- 입사일 (연차 자동계산 기준)
   adjust_days  numeric not null default 0,  -- 관리자 수동 조정(이월·차감 등)
   active       boolean not null default true,
   created_at   timestamptz not null default now()
 );
--- 이미 만들어진 프로젝트(테이블이 먼저 생성된 경우)에도 부서·직급 컬럼을 추가한다
+-- 이미 만들어진 프로젝트(테이블이 먼저 생성된 경우)에도 부서·직급·연락처 컬럼을 추가한다
 alter table ul_profiles add column if not exists department text;
 alter table ul_profiles add column if not exists job_title text;
+alter table ul_profiles add column if not exists phone text;
 
 create or replace function ul_on_auth_user_created()
 returns trigger
