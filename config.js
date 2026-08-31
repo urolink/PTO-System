@@ -14,6 +14,6 @@
    만들면 직원들이 같은 로그인 정보를 그대로 씁니다.
    ══════════════════════════════════════════════════════════════ */
 window.UROLINK_CONFIG = {
-  SUPABASE_URL: '',
-  SUPABASE_KEY: ''
+  SUPABASE_URL: 'https://znifpzkyyiyevqemdwjf.supabase.co',
+  SUPABASE_KEY: 'sb_publishable_x-WbxXEDJrCFiv3TkZ_auA_K0aPLGHT'
 };
