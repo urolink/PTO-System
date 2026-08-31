@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831i';
+const APP_VERSION = '20260831j';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -380,10 +380,9 @@ function leaveFormHtml(l) {
   .toolbar{text-align:center;margin-bottom:26px;display:flex;gap:8px;justify-content:center}
   .toolbar button{padding:9px 20px;font-size:13px;font-weight:700;border:1px solid #0e7490;background:#0e7490;color:#fff;border-radius:6px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
   .toolbar button.dl{background:#fff;color:#0e7490}
-  .brandmark{position:absolute;top:14px;right:20px;font-size:15px;font-weight:800;letter-spacing:-.4px}
+  .brandmark{text-align:right;font-size:15px;font-weight:800;letter-spacing:-.4px;margin-bottom:14px}
   .brandmark .a{color:#0B1220}.brandmark .b{color:#42A5F5}
-  #doc-body{position:relative}
-  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px;padding-top:18px}
+  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px}
   .doc-title{font-size:27px;font-weight:800;letter-spacing:6px;padding-top:10px}
   .appr{border:1px solid #333;display:flex}
   .appr .lb{writing-mode:vertical-rl;padding:4px 3px;border-right:1px solid #333;font-weight:700;font-size:12.5px;letter-spacing:3px;display:flex;align-items:center;justify-content:center}
@@ -397,7 +396,7 @@ function leaveFormHtml(l) {
   .statement{text-align:center;margin:28px 0 22px;font-size:14px}
   .dateline{text-align:center;font-size:14px;margin-bottom:26px;letter-spacing:3px}
   .company{text-align:center;font-size:17px;font-weight:800;letter-spacing:3px}
-  @media print{ .toolbar{display:none} body{padding:0} .brandmark{top:0} }
+  @media print{ .toolbar{display:none} body{padding:0} }
 </style></head><body>
 <div class="toolbar">
   <button onclick="window.print()"><i>🖨</i> 인쇄</button>
