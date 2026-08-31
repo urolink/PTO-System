@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831c';
+const APP_VERSION = '20260831d';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -209,6 +209,26 @@ async function doLogout() {
   try { await SB.auth.signOut(); } catch (e) {}
   location.reload();
 }
+function accountBoxHtml() {
+  return `<b>${esc(ME.display_name || ME.email)}</b>${isAdmin() ? ' <span class="badge-admin">관리자</span>' : ''}`;
+}
+
+/* ── 비밀번호 변경 (본인) ── */
+function openPwModal() {
+  if (!isRemote()) { alert('테스트 모드에서는 비밀번호 변경을 쓸 수 없습니다.'); return; }
+  $('pw-new').value = ''; $('pw-confirm').value = ''; $('pw-msg').textContent = '';
+  new bootstrap.Modal($('modal-pw')).show();
+}
+async function changePassword() {
+  const pw = $('pw-new').value, pw2 = $('pw-confirm').value;
+  if (pw.length < 6) return $('pw-msg').textContent = '비밀번호는 6자 이상이어야 합니다.';
+  if (pw !== pw2) return $('pw-msg').textContent = '비밀번호가 서로 일치하지 않습니다.';
+  $('pw-msg').textContent = '변경 중...';
+  const { error } = await SB.auth.updateUser({ password: pw });
+  if (error) { $('pw-msg').textContent = error.message; return; }
+  bootstrap.Modal.getInstance($('modal-pw')).hide();
+  toast('비밀번호가 변경되었습니다');
+}
 
 /* ───────────────────────── 6. 라우팅 ───────────────────────── */
 const PAGES = ['dashboard', 'apply', 'calendar', 'approvals', 'employees'];
@@ -228,7 +248,7 @@ function showPage(p) {
 function startApp() {
   $('nav-approvals').style.display = isAdmin() ? '' : 'none';
   $('nav-employees').style.display = isAdmin() ? '' : 'none';
-  $('account-box').innerHTML = `<b>${esc(ME.display_name || ME.email)}</b>${isAdmin() ? ' <span class="badge-admin">관리자</span>' : ''}`;
+  $('account-box').innerHTML = accountBoxHtml();
   const p = location.hash.replace('#', '');
   showPage(PAGES.includes(p) ? p : 'dashboard');
   checkVersion();
@@ -477,7 +497,8 @@ function renderEmployees() {
 function openEmpModal(id) {
   const p = PROFILES.find(x => x.id === id); if (!p) return;
   $('em-id').value = p.id;
-  $('em-name').textContent = p.display_name || p.email;
+  $('em-email').textContent = p.email || '';
+  $('em-name').value = p.display_name || '';
   $('em-hire').value = p.hire_date || '';
   $('em-adjust').value = num(p.adjust_days);
   $('em-role').value = p.role === 'admin' ? 'admin' : 'user';
@@ -486,7 +507,10 @@ function openEmpModal(id) {
 }
 async function saveEmp() {
   const id = $('em-id').value;
+  const p = PROFILES.find(x => x.id === id);
+  const name = $('em-name').value.trim();
   const patch = {
+    display_name: name || (p.email || '').split('@')[0],
     hire_date: $('em-hire').value || null,
     adjust_days: num($('em-adjust').value),
     role: $('em-role').value,
@@ -497,11 +521,12 @@ async function saveEmp() {
     const { error } = await SB.from('ul_profiles').update(patch).eq('id', id);
     syncing(false);
     if (error) { toast('저장 실패: ' + error.message); return; }
-    Object.assign(PROFILES.find(p => p.id === id), patch);
+    Object.assign(p, patch);
   } else {
-    Object.assign(PROFILES.find(p => p.id === id), patch);
+    Object.assign(p, patch);
     save(true);
   }
+  if (id === ME.id) { Object.assign(ME, patch); $('account-box').innerHTML = accountBoxHtml(); }
   bootstrap.Modal.getInstance($('modal-emp')).hide();
   renderEmployees();
   toast('저장되었습니다');
