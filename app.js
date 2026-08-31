@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831g';
+const APP_VERSION = '20260831h';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -318,11 +318,13 @@ function submitApply() {
   const days = half ? 0.5 : countWeekdays(start, end);
   if (days <= 0) return alert('평일이 포함된 기간을 선택해주세요.');
   DB.leaves = DB.leaves || [];
+  const createdAt = new Date().toISOString();
   DB.leaves.push({
-    id: uid(), requesterId: ME.id, requesterName: ME.display_name || ME.email, requesterDept: ME.department || '', requesterTitle: ME.job_title || '',
+    id: uid(), docNo: genDocNo(createdAt),
+    requesterId: ME.id, requesterName: ME.display_name || ME.email, requesterDept: ME.department || '', requesterTitle: ME.job_title || '',
     type, startDate: start, endDate: end, days,
     reason: $('ap-reason').value.trim(), status: '대기',
-    decidedBy: '', decidedAt: '', rejectReason: '', createdAt: new Date().toISOString()
+    decidedBy: '', decidedTitle: '', decidedAt: '', rejectReason: '', createdAt
   });
   save();
   bootstrap.Modal.getInstance($('modal-apply')).hide();
@@ -357,48 +359,76 @@ function cancelLeave(id) {
   renderMyLeaves(); renderDashboard();
 }
 
-/* ───────────────────────── 8-1. 연차 신청서 (인쇄 / PDF 저장) ─────────────────────────
+/* ───────────────────────── 8-1. 연차 신청서 (회사 공식 양식, 인쇄 / PDF 저장) ─────────────────────────
    별도 다운로드 라이브러리 없이, 새 창에 인쇄용 문서를 그려서
-   브라우저 인쇄 대화상자의 "PDF로 저장"을 파일 다운로드로 쓴다. */
+   브라우저 인쇄 대화상자의 "PDF로 저장"을 파일 다운로드로 쓴다.
+   문서번호 형식: PTO + 신청일(YYYYMMDD) + '-' + 그 날짜의 신청 순번(2자리). */
+function genDocNo(createdAtIso) {
+  const d = String(createdAtIso).slice(0, 10).replace(/-/g, '');
+  const prefix = 'PTO' + d + '-';
+  const n = (DB.leaves || []).filter(x => String(x.docNo || '').startsWith(prefix)).length + 1;
+  return prefix + pad(n, 2);
+}
 function leaveFormHtml(l) {
   const p = (PROFILES || []).find(x => x.id === l.requesterId) || {};
+  const decided = l.status !== '대기';
   return `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8">
-<title>연차신청서 - ${esc(l.requesterName)}</title>
+<title>휴가신청서 - ${esc(l.docNo || '')}</title>
 <style>
-  body{font-family:'Malgun Gothic','Noto Sans KR',sans-serif;padding:48px;color:#111;max-width:640px;margin:0 auto}
-  h1{text-align:center;font-size:22px;letter-spacing:10px;border-bottom:3px double #111;padding-bottom:16px;margin-bottom:32px}
-  table{width:100%;border-collapse:collapse;margin-bottom:28px}
-  td,th{border:1px solid #333;padding:10px 12px;font-size:14px;vertical-align:top}
-  th{background:#f3f4f6;width:110px;text-align:left;font-weight:700}
-  .reason{min-height:56px;white-space:pre-wrap}
-  .sign-row{display:flex;justify-content:flex-end;gap:48px;margin-top:60px;font-size:14px}
-  .sign-box{text-align:center;color:#333}
-  .sign-line{margin-top:44px;border-top:1px solid #333;width:150px}
-  .toolbar{text-align:center;margin-bottom:28px}
+  body{font-family:'Malgun Gothic','Noto Sans KR',sans-serif;color:#111;max-width:720px;margin:0 auto;padding:36px 30px 50px}
+  .toolbar{text-align:center;margin-bottom:26px}
   .toolbar button{padding:9px 20px;font-size:13px;font-weight:700;border:1px solid #0e7490;background:#0e7490;color:#fff;border-radius:6px;cursor:pointer}
+  .doc-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:22px}
+  .doc-title{font-size:27px;font-weight:800;letter-spacing:6px;padding-top:10px}
+  .appr{border:1px solid #333;display:flex}
+  .appr .lb{writing-mode:vertical-rl;padding:4px 3px;border-right:1px solid #333;font-weight:700;font-size:12.5px;letter-spacing:3px;display:flex;align-items:center;justify-content:center}
+  .appr .slot{width:96px;display:flex;flex-direction:column}
+  .appr .role{height:30px;border-bottom:1px solid #333;font-size:12px;text-align:center;display:flex;align-items:center;justify-content:center}
+  .appr .sign{height:56px;font-size:13.5px;font-weight:700;text-align:center;display:flex;align-items:center;justify-content:center}
+  table.frm{width:100%;border-collapse:collapse}
+  table.frm th, table.frm td{border:1px solid #333;padding:9px 12px;font-size:13.5px}
+  table.frm th{background:#f4f5f7;font-weight:700;text-align:center;white-space:nowrap}
+  .reason{min-height:90px;white-space:pre-wrap;text-align:left;vertical-align:top}
+  .statement{text-align:center;margin:28px 0 22px;font-size:14px}
+  .dateline{text-align:center;font-size:14px;margin-bottom:26px;letter-spacing:3px}
+  .company{text-align:center;font-size:17px;font-weight:800;letter-spacing:3px}
   @media print{ .toolbar{display:none} body{padding:0} }
 </style></head><body>
 <div class="toolbar"><button onclick="window.print()">인쇄 / PDF로 저장</button></div>
-<h1>연 차 신 청 서</h1>
-<table>
-  <tr><th>성명</th><td>${esc(l.requesterName)}</td><th>직급</th><td>${esc(l.requesterTitle || p.job_title || '-')}</td></tr>
-  <tr><th>부서</th><td>${esc(l.requesterDept || p.department || '-')}</td><th>이메일</th><td>${esc(p.email || '-')}</td></tr>
-  <tr><th>구분</th><td colspan="3">${esc(l.type)}</td></tr>
-  <tr><th>기간</th><td colspan="3">${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)</td></tr>
-  <tr><th>사유</th><td colspan="3" class="reason">${esc(l.reason || '-')}</td></tr>
-  <tr><th>신청일</th><td>${fmtDate(l.createdAt)}</td><th>상태</th><td>${esc(l.status)}</td></tr>
-  ${l.status !== '대기' ? `<tr><th>처리자</th><td>${esc(l.decidedBy || '-')}</td><th>처리일</th><td>${fmtDate(l.decidedAt)}</td></tr>` : ''}
-  ${l.status === '반려' && l.rejectReason ? `<tr><th>반려 사유</th><td colspan="3">${esc(l.rejectReason)}</td></tr>` : ''}
-</table>
-<div class="sign-row">
-  <div class="sign-box">신청자<div class="sign-line"></div></div>
-  <div class="sign-box">승인자<div class="sign-line"></div></div>
+<div class="doc-head">
+  <div class="doc-title">휴 가 신 청 서</div>
+  <div class="appr">
+    <div class="lb">결재</div>
+    <div class="slot">
+      <div class="role">${decided ? esc(l.decidedTitle || '-') : ''}</div>
+      <div class="sign">${decided ? esc(l.decidedBy || '-') : ''}</div>
+    </div>
+  </div>
 </div>
+<table class="frm">
+  <tr><th style="width:100px">문서번호</th><td colspan="5">${esc(l.docNo || '-')}</td></tr>
+  <tr>
+    <th style="width:100px">신청일자</th><td style="width:130px">${fmtDate(l.createdAt)}</td>
+    <th style="width:80px">신청자</th><td style="width:110px">${esc(l.requesterName)}</td>
+    <th style="width:80px">부서</th><td>${esc(l.requesterDept || p.department || '-')}</td>
+  </tr>
+  <tr>
+    <th>직급</th><td>${esc(l.requesterTitle || p.job_title || '-')}</td>
+    <th>연락처</th><td colspan="3">-</td>
+  </tr>
+  <tr><th>휴가구분</th><td colspan="5">${esc(l.type)}</td></tr>
+  <tr><th>휴가기간</th><td colspan="5">${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)</td></tr>
+  <tr><th>휴가사유</th><td colspan="5" class="reason">${esc(l.reason || '-')}</td></tr>
+</table>
+<div class="statement">위와 같이 휴가를 신청하오니 재가하여 주시기 바랍니다.</div>
+<div class="dateline">${String(l.createdAt).slice(0, 4)}년&nbsp;&nbsp;${num(String(l.createdAt).slice(5, 7))}월&nbsp;&nbsp;${num(String(l.createdAt).slice(8, 10))}일</div>
+<div class="company">주식회사 유로링크</div>
 </body></html>`;
 }
 function openLeaveForm(id) {
   const l = (DB.leaves || []).find(x => x.id === id);
   if (!l) return;
+  if (!l.docNo) { l.docNo = genDocNo(l.createdAt); save(true); }   // 기능 추가 전 신청건 소급 부여
   const w = window.open('', '_blank');
   if (!w) { alert('팝업이 차단되었습니다. 브라우저 팝업 차단을 해제한 뒤 다시 시도해주세요.'); return; }
   w.document.write(leaveFormHtml(l));
@@ -479,7 +509,7 @@ function decideLeave(id, decision) {
   if (decision === '반려') {
     reason = prompt('반려 사유를 입력해주세요(선택):') || '';
   }
-  row.status = decision; row.decidedBy = ME.display_name || ME.email;
+  row.status = decision; row.decidedBy = ME.display_name || ME.email; row.decidedTitle = ME.job_title || '';
   row.decidedAt = new Date().toISOString(); row.rejectReason = reason;
   save();
   renderApprovals(); renderDashboard();
@@ -491,7 +521,7 @@ function undecideLeave(id) {
   const row = (DB.leaves || []).find(l => l.id === id);
   if (!row) return;
   if (!confirm(`${row.requesterName}님의 ${row.type} 신청(${row.status})을 대기중으로 되돌릴까요?`)) return;
-  row.status = '대기'; row.decidedBy = ''; row.decidedAt = ''; row.rejectReason = '';
+  row.status = '대기'; row.decidedBy = ''; row.decidedTitle = ''; row.decidedAt = ''; row.rejectReason = '';
   save();
   renderApprovals(); renderDashboard();
 }
