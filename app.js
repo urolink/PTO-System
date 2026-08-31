@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831e';
+const APP_VERSION = '20260831f';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -92,7 +92,7 @@ function loadLocal() {
   catch (e) { DB = null; }
   if (!DB || typeof DB !== 'object') {
     DB = blankDB();
-    ME = { id: 'me', email: 'test@urolink.co.kr', display_name: '테스트관리자', role: 'admin',
+    ME = { id: 'me', email: 'test@urolink.co.kr', display_name: '테스트관리자', department: '영업팀', role: 'admin',
            hire_date: '2022-03-02', adjust_days: 0, active: true };
     DB.employees = [ME];
     save(true);
@@ -161,7 +161,7 @@ async function pushDiff(silent) {
 async function pullRemote() {
   const [lv, pf] = await Promise.all([
     SB.from('ul_leaves').select('id,data'),
-    SB.from('ul_profiles').select('id,email,display_name,role,hire_date,adjust_days,active').order('display_name')
+    SB.from('ul_profiles').select('id,email,display_name,department,role,hire_date,adjust_days,active').order('display_name')
   ]);
   if (lv.error) { toast('데이터를 불러오지 못했습니다: ' + lv.error.message); DB = blankDB(); }
   else DB = { leaves: (lv.data || []).map(r => Object.assign({ id: r.id }, r.data)), employees: [], meta: { ver: 1 } };
@@ -191,7 +191,7 @@ async function doLogin() {
 
 async function afterLogin(session) {
   const { data: p } = await SB.from('ul_profiles')
-    .select('id,email,display_name,role,hire_date,adjust_days,active').eq('id', session.user.id).maybeSingle();
+    .select('id,email,display_name,department,role,hire_date,adjust_days,active').eq('id', session.user.id).maybeSingle();
   ME = p || { id: session.user.id, email: session.user.email,
               display_name: String(session.user.email || '').split('@')[0], role: 'user', adjust_days: 0, active: true };
   if (p && p.active === false) {
@@ -274,7 +274,7 @@ function renderDashboard() {
     .sort((a, b) => a.startDate.localeCompare(b.startDate));
   $('dash-month-list').innerHTML = monthLeaves.length ? monthLeaves.map(l =>
     `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px">
-       <span>${esc(l.requesterName)} · ${esc(l.type)}</span>
+       <span>${l.requesterDept ? esc(l.requesterDept) + ' · ' : ''}${esc(l.requesterName)} · ${esc(l.type)}</span>
        <span style="color:#64748b">${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''}</span>
      </div>`).join('') : '<div class="empty-ul">이번 달 승인된 휴가가 없습니다</div>';
 }
@@ -319,7 +319,7 @@ function submitApply() {
   if (days <= 0) return alert('평일이 포함된 기간을 선택해주세요.');
   DB.leaves = DB.leaves || [];
   DB.leaves.push({
-    id: uid(), requesterId: ME.id, requesterName: ME.display_name || ME.email,
+    id: uid(), requesterId: ME.id, requesterName: ME.display_name || ME.email, requesterDept: ME.department || '',
     type, startDate: start, endDate: end, days,
     reason: $('ap-reason').value.trim(), status: '대기',
     decidedBy: '', decidedAt: '', rejectReason: '', createdAt: new Date().toISOString()
@@ -381,7 +381,8 @@ function leaveFormHtml(l) {
 <div class="toolbar"><button onclick="window.print()">인쇄 / PDF로 저장</button></div>
 <h1>연 차 신 청 서</h1>
 <table>
-  <tr><th>성명</th><td>${esc(l.requesterName)}</td><th>이메일</th><td>${esc(p.email || '-')}</td></tr>
+  <tr><th>성명</th><td>${esc(l.requesterName)}</td><th>부서</th><td>${esc(l.requesterDept || p.department || '-')}</td></tr>
+  <tr><th>이메일</th><td colspan="3">${esc(p.email || '-')}</td></tr>
   <tr><th>구분</th><td colspan="3">${esc(l.type)}</td></tr>
   <tr><th>기간</th><td colspan="3">${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''} (${l.days}일)</td></tr>
   <tr><th>사유</th><td colspan="3" class="reason">${esc(l.reason || '-')}</td></tr>
@@ -428,7 +429,7 @@ function renderCalendar() {
     const hits = approved.filter(l => dateStr >= l.startDate && dateStr <= l.endDate);
     return `<div class="cal-cell${dateStr === tday ? ' today' : ''}">
       <div class="d">${d}</div>
-      ${hits.map(l => `<span class="cal-tag" title="${esc(l.requesterName)} ${esc(l.type)}">${esc(l.requesterName)}${HALF_TYPES.includes(l.type) ? '(' + esc(l.type[2]) + ')' : ''}</span>`).join('')}
+      ${hits.map(l => `<span class="cal-tag" title="${esc(l.requesterDept || '')} ${esc(l.requesterName)} ${esc(l.type)}">${l.requesterDept ? esc(l.requesterDept) + ' · ' : ''}${esc(l.requesterName)}${HALF_TYPES.includes(l.type) ? '(' + esc(l.type[2]) + ')' : ''}</span>`).join('')}
     </div>`;
   }).join('');
 }
@@ -439,6 +440,7 @@ function renderApprovals() {
   $('pending-body').innerHTML = pending.length ? pending.map(l => `
     <tr>
       <td>${esc(l.requesterName)}</td>
+      <td>${esc(l.requesterDept || '-')}</td>
       <td>${esc(l.type)}</td>
       <td>${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''}</td>
       <td>${l.days}일</td>
@@ -448,12 +450,13 @@ function renderApprovals() {
         <button class="btn btn-sm btn-success" onclick="decideLeave('${l.id}','승인')">승인</button>
         <button class="btn btn-sm btn-outline-danger" onclick="decideLeave('${l.id}','반려')">반려</button>
       </td>
-    </tr>`).join('') : `<tr><td colspan="7" class="empty-ul">대기중인 신청이 없습니다</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="8" class="empty-ul">대기중인 신청이 없습니다</td></tr>`;
 
   const decided = (DB.leaves || []).filter(l => l.status !== '대기').sort((a, b) => (b.decidedAt || '').localeCompare(a.decidedAt || '')).slice(0, 50);
   $('decided-body').innerHTML = decided.length ? decided.map(l => `
     <tr>
       <td>${esc(l.requesterName)}</td>
+      <td>${esc(l.requesterDept || '-')}</td>
       <td>${esc(l.type)}</td>
       <td>${fmtDate(l.startDate)}${l.endDate !== l.startDate ? ' ~ ' + fmtDate(l.endDate) : ''}</td>
       <td>${l.days}일</td>
@@ -464,7 +467,7 @@ function renderApprovals() {
         <button class="btn btn-sm btn-outline-secondary" onclick="openLeaveForm('${l.id}')" title="신청서 보기/인쇄"><i class="bi bi-printer"></i></button>
         <button class="btn btn-sm btn-outline-warning" onclick="undecideLeave('${l.id}')" title="대기중으로 되돌리기">결정 취소</button>
       </td>
-    </tr>`).join('') : `<tr><td colspan="8" class="empty-ul">처리 이력이 없습니다</td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="9" class="empty-ul">처리 이력이 없습니다</td></tr>`;
 }
 function decideLeave(id, decision) {
   if (!isAdmin()) return;
@@ -498,6 +501,7 @@ function renderEmployees() {
     const remain = p.hire_date ? remainingDays(p) : null;
     return `<tr>
       <td>${esc(p.display_name || '-')}</td>
+      <td>${esc(p.department || '-')}</td>
       <td>${esc(p.email || '-')}</td>
       <td>${p.role === 'admin' ? '<span class="badge-admin">관리자</span>' : '일반'}</td>
       <td>${p.hire_date ? fmtDate(p.hire_date) : '<span style="color:#cbd5e1">미등록</span>'}</td>
@@ -506,13 +510,14 @@ function renderEmployees() {
       <td>${p.active === false ? '<span class="badge-st no">차단</span>' : '<span class="badge-st ok">활성</span>'}</td>
       <td><button class="btn btn-sm btn-outline-secondary" onclick="openEmpModal('${p.id}')"><i class="bi bi-pencil"></i></button></td>
     </tr>`;
-  }).join('') : `<tr><td colspan="8" class="empty-ul">직원이 없습니다</td></tr>`;
+  }).join('') : `<tr><td colspan="9" class="empty-ul">직원이 없습니다</td></tr>`;
 }
 function openEmpModal(id) {
   const p = PROFILES.find(x => x.id === id); if (!p) return;
   $('em-id').value = p.id;
   $('em-email').textContent = p.email || '';
   $('em-name').value = p.display_name || '';
+  $('em-dept').value = p.department || '';
   $('em-hire').value = p.hire_date || '';
   $('em-adjust').value = num(p.adjust_days);
   $('em-role').value = p.role === 'admin' ? 'admin' : 'user';
@@ -525,6 +530,7 @@ async function saveEmp() {
   const name = $('em-name').value.trim();
   const patch = {
     display_name: name || (p.email || '').split('@')[0],
+    department: $('em-dept').value.trim(),
     hire_date: $('em-hire').value || null,
     adjust_days: num($('em-adjust').value),
     role: $('em-role').value,

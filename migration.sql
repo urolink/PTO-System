@@ -16,12 +16,15 @@ create table if not exists ul_profiles (
   id           uuid primary key references auth.users(id) on delete cascade,
   email        text,
   display_name text,
+  department   text,                        -- 부서
   role         text not null default 'user' check (role in ('admin','user')),
   hire_date    date,                        -- 입사일 (연차 자동계산 기준)
   adjust_days  numeric not null default 0,  -- 관리자 수동 조정(이월·차감 등)
   active       boolean not null default true,
   created_at   timestamptz not null default now()
 );
+-- 이미 만들어진 프로젝트(테이블이 먼저 생성된 경우)에도 부서 컬럼을 추가한다
+alter table ul_profiles add column if not exists department text;
 
 create or replace function ul_on_auth_user_created()
 returns trigger
@@ -72,7 +75,8 @@ begin
   if (new.role is distinct from old.role
       or new.active is distinct from old.active
       or new.adjust_days is distinct from old.adjust_days
-      or new.hire_date is distinct from old.hire_date)
+      or new.hire_date is distinct from old.hire_date
+      or new.department is distinct from old.department)
      and auth.uid() is not null
      and not ul_is_admin() then
     raise exception '권한이 없습니다(관리자만 변경 가능)';
