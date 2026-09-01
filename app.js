@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831n';
+const APP_VERSION = '20260831o';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -297,6 +297,7 @@ function renderDashboard() {
       <b>${remain == null ? '-' : remain}</b>
       <div class="s">입사일 미등록이면 관리자에게 요청해주세요</div>
     </div>
+    <div class="wt-fact"><div class="l">입사일</div><b style="font-size:16px">${ME.hire_date ? fmtDate(ME.hire_date) : '미등록'}</b><div class="s">&nbsp;</div></div>
     <div class="wt-fact"><div class="l">발생</div><b>${granted}</b><div class="s">일</div></div>
     <div class="wt-fact"><div class="l">사용</div><b>${used}</b><div class="s">일</div></div>
     <div class="wt-fact"><div class="l">수동조정</div><b class="${adjust < 0 ? 'rd' : ''}">${adjust >= 0 ? '+' : ''}${adjust}</b><div class="s">일</div></div>
