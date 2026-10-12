@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20261012a';
+const APP_VERSION = '20261012b';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -81,7 +81,7 @@ const isRemote = () => MODE === 'remote';
 const isAdmin = () => !!(ME && ME.role === 'admin');
 const clone = o => JSON.parse(JSON.stringify(o));
 
-function blankDB() { return { leaves: [], employees: [], meta: { ver: 1 } }; }
+function blankDB() { return { leaves: [], holidays: [], employees: [], meta: { ver: 1 } }; }
 function fixShape() {
   const b = blankDB();
   Object.keys(b).forEach(k => { if (DB[k] == null) DB[k] = b[k]; });
@@ -125,31 +125,47 @@ function syncOk() {
   syncing._t = setTimeout(() => badge.classList.remove('show', 'done'), 1200);
 }
 
+/* ── 서버 컬렉션 — 연차 신청(leaves)과 회사 휴무일(holidays) ──
+   holidays 는 migration.sql 3번을 아직 실행하지 않은 환경도 있어서 '선택적'이다.
+   서버에 테이블이 없으면 오류로 막지 않고 이 브라우저(캐시)에만 보관한다. */
+const COLLS = { leaves: 'ul_leaves', holidays: 'ul_company_holidays' };
+const OPTIONAL_COLLS = ['holidays'];
+const MISSING = new Set();
+const isMissingRelation = m => /relation .* does not exist|could not find the table|schema cache/i.test(String(m || ''));
+
 async function pushDiff(silent) {
   if (!SB) return;
-  const cur = DB.leaves || [], prev = SHADOW.leaves || [];
-  const curMap = new Map(), prevMap = new Map();
-  cur.forEach(r => curMap.set(r.id, r));
-  prev.forEach(r => prevMap.set(r.id, r));
-  const ups = [], dels = [];
-  curMap.forEach((row, k) => {
-    const p = prevMap.get(k);
-    if (!p || JSON.stringify(p) !== JSON.stringify(row)) ups.push({ id: k, data: row });
+  const ops = [], where = [];
+  Object.keys(COLLS).forEach(coll => {
+    if (MISSING.has(coll)) return;                 // 서버에 테이블이 없는 컬렉션은 건너뛴다(캐시에는 남아 있음)
+    const cur = DB[coll] || [], prev = SHADOW[coll] || [];
+    const curMap = new Map(), prevMap = new Map();
+    cur.forEach(r => curMap.set(r.id, r));
+    prev.forEach(r => prevMap.set(r.id, r));
+    const ups = [], dels = [];
+    curMap.forEach((row, k) => {
+      const p = prevMap.get(k);
+      if (!p || JSON.stringify(p) !== JSON.stringify(row)) ups.push({ id: k, data: row });
+    });
+    prevMap.forEach((_, k) => { if (!curMap.has(k)) dels.push(k); });
+    if (ups.length) { ops.push(SB.from(COLLS[coll]).upsert(ups)); where.push(coll); }
+    if (dels.length) { ops.push(SB.from(COLLS[coll]).delete().in('id', dels)); where.push(coll); }
   });
-  prevMap.forEach((_, k) => { if (!curMap.has(k)) dels.push(k); });
-  if (!ups.length && !dels.length) { if (!silent) toast('변경된 내용이 없습니다'); return; }
+  if (!ops.length) { if (!silent) toast('변경된 내용이 없습니다'); return; }
 
   syncing(true);
-  const ops = [];
-  if (ups.length) ops.push(SB.from('ul_leaves').upsert(ups));
-  if (dels.length) ops.push(SB.from('ul_leaves').delete().in('id', dels));
   let res;
   try { res = await Promise.all(ops); }
   catch (e) { syncing(false); toast('네트워크 오류 — 서버에 저장하지 못했습니다'); console.error(e); return; }
   syncing(false);
-  const bad = res.find(r => r && r.error);
-  if (bad) {
-    const m = String(bad.error.message || '');
+  const bi = res.findIndex(r => r && r.error);
+  if (bi >= 0) {
+    const bad = res[bi], m = String(bad.error.message || ''), coll = where[bi];
+    if (OPTIONAL_COLLS.indexOf(coll) >= 0 && isMissingRelation(m)) {
+      MISSING.add(coll);
+      toast('회사 휴무일을 저장할 서버 테이블이 아직 없어 이 브라우저에만 보관됩니다 (migration.sql 3번 실행 필요)');
+      return;
+    }
     toast(/row-level security|permission|policy/i.test(m) ? '권한이 없어 저장하지 못했습니다' : '저장 실패: ' + m);
     console.error(bad.error);
     return;
@@ -159,12 +175,28 @@ async function pushDiff(silent) {
 }
 
 async function pullRemote() {
-  const [lv, pf] = await Promise.all([
-    SB.from('ul_leaves').select('id,data'),
+  const names = Object.keys(COLLS);
+  const res = await Promise.all([
     SB.from('ul_profiles').select('id,email,display_name,department,job_title,phone,role,hire_date,adjust_days,active').order('display_name')
-  ]);
-  if (lv.error) { toast('데이터를 불러오지 못했습니다: ' + lv.error.message); DB = blankDB(); }
-  else DB = { leaves: (lv.data || []).map(r => Object.assign({ id: r.id }, r.data)), employees: [], meta: { ver: 1 } };
+  ].concat(names.map(n => SB.from(COLLS[n]).select('id,data'))));
+  const pf = res[0];
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem(LS_KEY + '_cache') || 'null'); } catch (e) {}
+  const next = { employees: [], meta: { ver: 1 } };
+  names.forEach((n, i) => {
+    const r = res[i + 1];
+    if (r.error) {
+      /* 선택적 컬렉션의 테이블이 아직 없으면 오류로 보지 않고, 이 브라우저에 있던 값을 이어간다 */
+      if (OPTIONAL_COLLS.indexOf(n) >= 0 && isMissingRelation(r.error.message)) { MISSING.add(n); next[n] = (cached && cached[n]) || []; return; }
+      if (n === 'leaves') toast('데이터를 불러오지 못했습니다: ' + r.error.message);
+      next[n] = [];
+      return;
+    }
+    next[n] = (r.data || []).map(x => Object.assign({ id: x.id }, x.data));
+  });
+  DB = next;
+  fixShape();
+  CMP_MAP = null;
   if (!pf.error) PROFILES = pf.data || [];
   SHADOW = clone(DB);
 }
@@ -264,10 +296,10 @@ function notifyRequesterOfDecision(l) {
 }
 
 /* ───────────────────────── 6. 라우팅 ───────────────────────── */
-const PAGES = ['dashboard', 'apply', 'calendar', 'approvals', 'employees'];
+const PAGES = ['dashboard', 'apply', 'calendar', 'approvals', 'employees', 'holidays'];
 function showPage(p) {
   if (!PAGES.includes(p)) p = 'dashboard';
-  if ((p === 'approvals' || p === 'employees') && !isAdmin()) p = 'dashboard';
+  if ((p === 'approvals' || p === 'employees' || p === 'holidays') && !isAdmin()) p = 'dashboard';
   PAGES.forEach(x => { $('page-' + x).classList.toggle('active', x === p); });
   document.querySelectorAll('.nav-link[data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === p));
   if (p === 'dashboard') renderDashboard();
@@ -275,12 +307,14 @@ function showPage(p) {
   if (p === 'calendar') renderCalendar();
   if (p === 'approvals') renderApprovals();
   if (p === 'employees') renderEmployees();
+  if (p === 'holidays') renderCompanyHolidays();
   location.hash = p;
 }
 
 function startApp() {
   $('nav-approvals').style.display = isAdmin() ? '' : 'none';
   $('nav-employees').style.display = isAdmin() ? '' : 'none';
+  $('nav-holidays').style.display = isAdmin() ? '' : 'none';
   $('account-box').innerHTML = accountBoxHtml();
   const p = location.hash.replace('#', '');
   showPage(PAGES.includes(p) ? p : 'dashboard');
@@ -401,7 +435,17 @@ function holidaysOf(y) {
   }
   return (HOL_CACHE[y] = r);
 }
-const holidayName = s => holidaysOf(+String(s).slice(0, 4)).map[String(s).slice(0, 10)] || '';
+/* 회사 자체 휴무일(관리자가 등록) — 법정 공휴일과 같이 '쉬는 날'로 취급한다 */
+let CMP_MAP = null;
+function cmpMap() {
+  if (CMP_MAP) return CMP_MAP;
+  CMP_MAP = {};
+  ((DB && DB.holidays) || []).forEach(h => { if (h.date) CMP_MAP[h.date] = h.name || '회사 휴무'; });
+  return CMP_MAP;
+}
+const companyHolidayName = s => cmpMap()[String(s).slice(0, 10)] || '';
+const publicHolidayName = s => holidaysOf(+String(s).slice(0, 4)).map[String(s).slice(0, 10)] || '';
+const holidayName = s => publicHolidayName(s) || companyHolidayName(s);
 /* 쉬는 날(주말 또는 공휴일) — 연차 일수에서 빠지고, 캘린더에 휴가를 표시하지 않는다 */
 function isOffDay(s) { const d = parseD(s); return !d || d.getDay() === 0 || d.getDay() === 6 || !!holidayName(s); }
 /* 기간 안의 '평일인데 공휴일'인 날들 — 연차 일수에서 제외된 날을 보여주기 위해 쓴다 */
@@ -428,10 +472,10 @@ function applyDaysRecalc() {
   let days = half ? (s ? 0.5 : 0) : countWorkdays(s, e), note = '';
   if (half && s && isOffDay(s)) {
     days = 0;
-    note = ' (주말·공휴일은 신청할 수 없습니다' + (holidayName(s) ? ': ' + holidayName(s) : '') + ')';
+    note = ' (쉬는 날은 신청할 수 없습니다' + (holidayName(s) ? ': ' + holidayName(s) : '') + ')';
   } else if (!half && s && e) {
     const h = holidaysOnWeekdays(s, e);
-    if (h.length) note = ' (공휴일 ' + h.length + '일 제외: ' + h.map(x => x.name).join(', ') + ')';
+    if (h.length) note = ' (휴일 ' + h.length + '일 제외: ' + h.map(x => x.name).join(', ') + ')';
   }
   $('ap-days-view').textContent = days;
   $('ap-hol-note').textContent = note;
@@ -444,9 +488,9 @@ function submitApply() {
   const end = half ? start : $('ap-end').value;
   if (!start || !end) return alert('날짜를 입력해주세요.');
   if (end < start) return alert('종료일이 시작일보다 빠를 수 없습니다.');
-  if (half && isOffDay(start)) return alert('주말·공휴일에는 반차를 신청할 수 없습니다.' + (holidayName(start) ? '\n(' + holidayName(start) + ')' : ''));
+  if (half && isOffDay(start)) return alert('주말·공휴일·회사 휴무일에는 반차를 신청할 수 없습니다.' + (holidayName(start) ? '\n(' + holidayName(start) + ')' : ''));
   const days = half ? 0.5 : countWorkdays(start, end);
-  if (days <= 0) return alert('근무일(주말·공휴일 제외)이 포함된 기간을 선택해주세요.');
+  if (days <= 0) return alert('근무일(주말·공휴일·회사 휴무일 제외)이 포함된 기간을 선택해주세요.');
   const reason = $('ap-reason').value.trim();
 
   if (EDITING_LEAVE_ID) {
@@ -622,27 +666,32 @@ function renderCalendar() {
   while (cells.length % 7 !== 0) cells.push(null);
   const approved = (DB.leaves || []).filter(l => l.status === '승인');
   const tday = today();
+  const PUB = holidaysOf(CAL_Y).map;
   $('cal-grid').innerHTML = cells.map((d, idx) => {
     if (!d) return `<div class="cal-cell other"></div>`;
     const dateStr = `${CAL_Y}-${pad(CAL_M + 1)}-${pad(d)}`;
     const dow = idx % 7;                                  // 한 줄이 일요일부터 7칸이라 칸 번호로 요일을 안다
-    const hol = holidayName(dateStr);
+    const pub = PUB[dateStr] || '';                       // 법정 공휴일
+    const cmp = pub ? '' : companyHolidayName(dateStr);   // 회사 자체 휴무일(법정 공휴일과 겹치면 법정 공휴일만 보여준다)
+    const hol = pub || cmp;
     const off = dow === 0 || dow === 6 || !!hol;
-    /* 휴가는 근무일에만 표시 — 주말·공휴일에 이름이 붙으면 그날도 쉬는 것처럼 보인다 */
+    /* 휴가는 근무일에만 표시 — 주말·휴일에 이름이 붙으면 그날도 쉬는 것처럼 보인다 */
     const hits = off ? [] : approved.filter(l => dateStr >= l.startDate && dateStr <= l.endDate);
-    const cls = (dateStr === tday ? ' today' : '') + (hol ? ' hol' : '') + (dow === 0 ? ' sun' : dow === 6 ? ' sat' : '');
+    const cls = (dateStr === tday ? ' today' : '') + (pub ? ' hol' : cmp ? ' cmp' : '') + (dow === 0 ? ' sun' : dow === 6 ? ' sat' : '');
     return `<div class="cal-cell${cls}">
       <div class="d">${d}</div>
-      ${hol ? `<span class="cal-hol" title="${esc(hol)}">${esc(hol)}</span>` : ''}
+      ${hol ? `<span class="cal-hol${cmp ? ' cmp' : ''}" title="${esc(hol)}${cmp ? ' (회사 휴무)' : ''}">${esc(hol)}</span>` : ''}
       ${hits.map(l => `<span class="cal-tag" title="${esc(l.requesterDept || '')} ${esc(l.requesterTitle || '')} ${esc(l.requesterName)} ${esc(l.type)}">${l.requesterDept ? esc(l.requesterDept) + ' · ' : ''}${esc(l.requesterName)}${l.requesterTitle ? ' ' + esc(l.requesterTitle) : ''}${HALF_TYPES.includes(l.type) ? '(' + esc(l.type[2]) + ')' : ''}</span>`).join('')}
     </div>`;
   }).join('');
   /* 이번 달 휴일 목록(좁은 화면에서는 칸 안 이름이 잘리므로) + 예상 계산 안내 */
   const H = holidaysOf(CAL_Y), ym = `${CAL_Y}-${pad(CAL_M + 1)}`;
-  const list = Object.keys(H.map).filter(k => k.slice(0, 7) === ym).sort();
-  $('cal-note').innerHTML = (list.length
-      ? '<b>이번 달 휴일</b> ' + list.map(k => `${+k.slice(8)}일 ${esc(H.map[k])}`).join(' · ')
-      : '이번 달에는 공휴일이 없습니다.')
+  const items = Object.keys(H.map).filter(k => k.slice(0, 7) === ym).map(k => ({ k: k, t: H.map[k] }));
+  Object.keys(cmpMap()).filter(k => k.slice(0, 7) === ym && !H.map[k]).forEach(k => items.push({ k: k, t: cmpMap()[k] + ' (회사)' }));
+  items.sort((a, b) => a.k.localeCompare(b.k));
+  $('cal-note').innerHTML = (items.length
+      ? '<b>이번 달 휴일</b> ' + items.map(x => `${+x.k.slice(8)}일 ${esc(x.t)}`).join(' · ')
+      : '이번 달에는 휴일이 없습니다.')
     + (H.estimated ? `<span class="est">※ ${CAL_Y}년 공휴일은 법정 기준으로 계산한 예상입니다. 임시공휴일은 포함되지 않았습니다.${H.noLunar ? ' (음력 명절은 반영되지 않았습니다)' : ''}</span>` : '');
 }
 
@@ -771,6 +820,69 @@ async function saveEmp() {
   bootstrap.Modal.getInstance($('modal-emp')).hide();
   renderEmployees();
   toast('저장되었습니다');
+}
+
+/* ───────────────────────── 11-1. 회사 휴무일 (관리자) ─────────────────────────
+   창립기념일·여름휴가처럼 회사가 정한 휴무일을 관리자가 등록한다. 법정 공휴일과 같이 '쉬는 날'로 취급되어
+   팀 캘린더에 표시되고 연차 일수에서 빠진다. 한 번에 기간(시작~종료)으로 넣으면 날짜마다 한 건씩 저장하되
+   같은 group 으로 묶어 목록에서는 한 줄로 보여주고 한 번에 지운다.
+   주말·법정 공휴일·이미 등록된 날은 이미 쉬는 날이라 건너뛴다. */
+function addCompanyHoliday() {
+  if (!isAdmin()) return;
+  const s = $('ch-start').value, e = $('ch-end').value || s, name = $('ch-name').value.trim();
+  if (!s) return alert('시작일을 입력해주세요.');
+  if (e < s) return alert('종료일이 시작일보다 빠를 수 없습니다.');
+  if (!name) return alert('이름을 입력해주세요.');
+  const a = parseD(s), b = parseD(e);
+  if ((b - a) / 86400000 > 62) return alert('한 번에 약 2개월(62일)까지만 등록할 수 있습니다.');
+  const group = uid(), rows = [], skipped = [], iso = new Date().toISOString(), by = ME.display_name || ME.email;
+  for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+    const k = ymd(d), wd = d.getDay();
+    if (wd === 0 || wd === 6 || publicHolidayName(k) || companyHolidayName(k)) { skipped.push(k); continue; }
+    rows.push({ id: uid() + rows.length, date: k, name: name, group: group, by: by, createdAt: iso });
+  }
+  if (!rows.length) return alert('등록할 날이 없습니다.\n선택한 기간이 모두 주말·공휴일이거나 이미 등록된 휴무일입니다.');
+  DB.holidays = (DB.holidays || []).concat(rows);
+  CMP_MAP = null;
+  save(true);
+  $('ch-start').value = ''; $('ch-end').value = ''; $('ch-name').value = '';
+  renderCompanyHolidays();
+  toast(rows.length + '일 등록되었습니다' + (skipped.length ? ' (주말·공휴일 등 ' + skipped.length + '일 제외)' : ''));
+  /* 이미 신청된 연차의 일수는 자동으로 바뀌지 않는다 — 관리자가 알 수 있게 알려준다 */
+  const hit = (DB.leaves || []).filter(l => l.status !== '반려' && rows.some(r => r.date >= l.startDate && r.date <= l.endDate)).length;
+  if (hit) alert('이 기간에 이미 신청된 연차가 ' + hit + '건 있습니다.\n이미 신청된 건의 일수는 자동으로 바뀌지 않습니다.\n필요하면 직원 관리의 "수동조정"으로 맞춰주세요.');
+}
+function removeCompanyHoliday(key) {
+  if (!isAdmin()) return;
+  const rows = (DB.holidays || []).filter(h => (h.group || h.id) === key);
+  if (!rows.length) return;
+  const dates = rows.map(h => h.date).sort();
+  if (!confirm('"' + rows[0].name + '" (' + fmtDate(dates[0]) + (dates.length > 1 ? ' ~ ' + fmtDate(dates[dates.length - 1]) : '') + ') 휴무일을 삭제할까요?\n삭제해도 이미 신청된 연차의 일수는 바뀌지 않습니다.')) return;
+  DB.holidays = DB.holidays.filter(h => (h.group || h.id) !== key);
+  CMP_MAP = null;
+  save(true);
+  renderCompanyHolidays();
+  toast('삭제되었습니다');
+}
+function renderCompanyHolidays() {
+  if (!isAdmin()) return;
+  const rows = (DB.holidays || []).slice().sort((x, y) => String(x.date).localeCompare(String(y.date)));
+  const groups = [], byKey = {};
+  rows.forEach(h => {
+    const k = h.group || h.id;
+    const g = byKey[k] || (byKey[k] = { key: k, name: h.name, by: h.by, dates: [] });
+    if (g.dates.length === 0) groups.push(g);
+    g.dates.push(h.date);
+  });
+  const td = today();
+  $('ch-body').innerHTML = groups.length ? groups.map(g => {
+    const a = g.dates[0], b = g.dates[g.dates.length - 1];
+    return '<tr' + (b < td ? ' style="opacity:.55"' : '') + '><td>' + fmtDate(a) + (b !== a ? ' ~ ' + fmtDate(b) : '') + '</td>'
+      + '<td>' + esc(g.name) + '</td><td>' + g.dates.length + '일</td><td>' + esc(g.by || '-') + '</td>'
+      + '<td><button class="btn btn-sm btn-outline-danger" onclick="removeCompanyHoliday(\'' + esc(g.key) + '\')">삭제</button></td></tr>';
+  }).join('') : '<tr><td colspan="5" class="empty-ul">등록된 회사 휴무일이 없습니다</td></tr>';
+  const miss = MISSING.has('holidays');
+  $('ch-warn').style.display = miss ? '' : 'none';
 }
 
 /* ───────────────────────── 12. 자동 최신화 ───────────────────────── */

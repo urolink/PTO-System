@@ -92,6 +92,10 @@ table.tbl-ul tr:hover td{background:#fafbfc}
 .cal-note b{color:#dc2626;font-weight:700}
 .cal-note .est{display:block;color:#92400e;margin-top:4px}
 @media(max-width:900px){.cal-hol{font-size:8.5px}}
+/* 회사 자체 휴무일(관리자 등록) — 법정 공휴일(빨강)과 구별되는 보라색 */
+.cal-cell.cmp{background:#faf5ff}
+.cal-cell.cmp .d{color:#7c3aed}
+.cal-hol.cmp{color:#7c3aed}
 
 /* ── 로그인 화면 ── */
 #login-screen{position:fixed;inset:0;z-index:5000;background:#0f172a;display:none;align-items:center;justify-content:center;padding:20px}

@@ -152,3 +152,38 @@ create policy ul_leaves_delete on ul_leaves
       (data->>'requesterId' = auth.uid()::text and data->>'status' = '대기')
     )
   );
+
+-- ───────────────────────────────────────────────────────────────
+-- 3. 회사 자체 휴무일 (관리자가 등록, 전 직원이 캘린더에서 조회)
+--    창립기념일·여름휴가 등. 팀 캘린더에 표시되고 연차 일수에서 제외된다.
+--    조회: 활성 계정 전부 / 추가·수정·삭제: 관리자만
+--    (이 3번 부분만 따로 실행해도 됩니다 — 여러 번 실행해도 안전)
+-- ───────────────────────────────────────────────────────────────
+create table if not exists ul_company_holidays (
+  id         text primary key,
+  data       jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists ul_company_holidays_touch on ul_company_holidays;
+create trigger ul_company_holidays_touch
+  before update on ul_company_holidays
+  for each row execute function ul_touch_updated_at();
+
+alter table ul_company_holidays enable row level security;
+
+drop policy if exists ul_ch_read   on ul_company_holidays;
+drop policy if exists ul_ch_insert on ul_company_holidays;
+drop policy if exists ul_ch_update on ul_company_holidays;
+drop policy if exists ul_ch_delete on ul_company_holidays;
+
+create policy ul_ch_read on ul_company_holidays
+  for select to authenticated using (ul_is_active());
+create policy ul_ch_insert on ul_company_holidays
+  for insert to authenticated with check (ul_is_active() and ul_is_admin());
+create policy ul_ch_update on ul_company_holidays
+  for update to authenticated
+  using (ul_is_active() and ul_is_admin())
+  with check (ul_is_active() and ul_is_admin());
+create policy ul_ch_delete on ul_company_holidays
+  for delete to authenticated using (ul_is_active() and ul_is_admin());
