@@ -6,7 +6,7 @@
 /* ───────────────────────── 1. 상수 ───────────────────────── */
 const LS_KEY = 'urolink_leave_v1';
 /* 배포 버전 — index.html 의 ?v= 값과 version.json 과 반드시 동일하게 유지 */
-const APP_VERSION = '20260831o';
+const APP_VERSION = '20261012a';
 
 const HALF_TYPES = ['오전반차', '오후반차'];
 /* 경조사는 연차와 별도 휴가라 잔여 연차에서 차감하지 않는다 */
@@ -333,18 +333,108 @@ function applyTypeChange() {
   if (half) $('ap-end').value = $('ap-start').value;
   applyDaysRecalc();
 }
-function countWeekdays(s, e) {
+/* ───────── 공휴일 ─────────
+   holidays.js 의 확정 데이터(KR_HOLIDAYS)를 쓰고, 확정 데이터가 없는 연도는 법정 규칙으로 '예상 계산'한다.
+   · 고정 공휴일 + 음력 명절(KR_LUNAR, 한국천문연구원 기준) + 대체공휴일 규칙(2023년 이후 기준)
+   · 임시공휴일·선거일은 미리 알 수 없어 예상 계산에는 들어가지 않는다 → 매년 holidays.js 를 갱신할 것
+   · 2023~2027년 확정 데이터와 대조해 날짜가 모두 일치함을 확인했다 */
+const KRH = window.KR_HOLIDAYS || {}, KRH_YEARS = window.KR_HOLIDAY_YEARS || [], KRL = window.KR_LUNAR || {};
+const HOL_CACHE = {};
+const dowOfStr = s => new Date(s + 'T12:00:00Z').getUTCDay();             // 0=일 ... 6=토
+function addDaysStr(s, n) { const d = new Date(s + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function holidayCompute(y) {
+  const H = {};                                                              // 날짜 → [{ n: 이름, sub: 대체 대상, multi: 설날·추석 연휴 }]
+  const add = (d, n, sub, multi) => (H[d] = H[d] || []).push({ n: n, sub: !!sub, multi: !!multi });
+  const f = (m, d) => y + '-' + pad(m) + '-' + pad(d);
+  add(f(1, 1), '신정', false);
+  add(f(3, 1), '삼일절', true);
+  if (y >= 2026) add(f(5, 1), '노동절', y >= 2027);                          // 2026년 공휴일 지정, 대체공휴일은 2027년부터
+  add(f(5, 5), '어린이날', true);
+  add(f(6, 6), '현충일', false);                                             // 현충일·신정은 대체공휴일 대상이 아니다
+  if (y >= 2026) add(f(7, 17), '제헌절', y >= 2027);
+  add(f(8, 15), '광복절', true);
+  add(f(10, 3), '개천절', true);
+  add(f(10, 9), '한글날', true);
+  add(f(12, 25), '성탄절', true);
+  const L = KRL[y];
+  if (L) {
+    add(addDaysStr(L[0], -1), '설날 연휴', true, true); add(L[0], '설날', true, true); add(addDaysStr(L[0], 1), '설날 연휴', true, true);
+    add(L[1], '부처님오신날', true);
+    add(addDaysStr(L[2], -1), '추석 연휴', true, true); add(L[2], '추석', true, true); add(addDaysStr(L[2], 1), '추석 연휴', true, true);
+  }
+  /* 대체공휴일 — 설날·추석 연휴는 '일요일'과 겹칠 때만(토요일은 대상 아님), 나머지는 토·일요일과 겹칠 때.
+     다른 공휴일과 같은 날이면(예: 어린이날=부처님오신날) 하루 대체한다. 대체일은 그 뒤 첫 '평일이면서 공휴일이 아닌 날'. */
+  const bases = [], seen = {};
+  Object.keys(H).sort().forEach(d => {
+    const items = H[d], subs = items.filter(x => x.sub);
+    if (!subs.length) return;
+    const multi = subs.some(x => x.multi), dow = dowOfStr(d);
+    if (!(multi ? dow === 0 : (dow === 0 || dow === 6)) && items.length < 2) return;
+    let end = d, label = subs[subs.length - 1].n;
+    if (multi) {                                                             // 연휴는 여러 날이어도 대체는 1건 — 연휴 마지막 날 다음부터 찾는다
+      const key = subs.find(x => x.multi).n.slice(0, 2);
+      label = key;
+      while (H[addDaysStr(end, 1)] && H[addDaysStr(end, 1)].some(x => x.multi && x.n.slice(0, 2) === key)) end = addDaysStr(end, 1);
+    }
+    if (seen[end]) return;
+    seen[end] = 1; bases.push({ base: end, label: label });
+  });
+  bases.sort((a, b) => a.base.localeCompare(b.base)).forEach(b => {
+    let c = addDaysStr(b.base, 1);
+    while (dowOfStr(c) === 0 || dowOfStr(c) === 6 || H[c]) c = addDaysStr(c, 1);
+    add(c, '대체공휴일(' + b.label + ')', false);
+  });
+  const map = {};
+  Object.keys(H).forEach(d => { map[d] = H[d].map(x => x.n).filter((n, i, a) => a.indexOf(n) === i).join('·'); });
+  return map;
+}
+/* 해당 연도의 공휴일 { map: {날짜: 이름}, estimated: 예상 계산 여부, noLunar: 음력 명절 표가 없음 } */
+function holidaysOf(y) {
+  if (HOL_CACHE[y]) return HOL_CACHE[y];
+  let r;
+  if (KRH_YEARS.indexOf(y) >= 0) {
+    const map = {};
+    Object.keys(KRH).forEach(d => { if (d.slice(0, 4) === String(y)) map[d] = KRH[d]; });
+    r = { map: map, estimated: false, noLunar: false };
+  } else {
+    r = { map: holidayCompute(y), estimated: true, noLunar: !KRL[y] };
+  }
+  return (HOL_CACHE[y] = r);
+}
+const holidayName = s => holidaysOf(+String(s).slice(0, 4)).map[String(s).slice(0, 10)] || '';
+/* 쉬는 날(주말 또는 공휴일) — 연차 일수에서 빠지고, 캘린더에 휴가를 표시하지 않는다 */
+function isOffDay(s) { const d = parseD(s); return !d || d.getDay() === 0 || d.getDay() === 6 || !!holidayName(s); }
+/* 기간 안의 '평일인데 공휴일'인 날들 — 연차 일수에서 제외된 날을 보여주기 위해 쓴다 */
+function holidaysOnWeekdays(s, e) {
+  const a = parseD(s), b = parseD(e), out = [];
+  if (!a || !b || b < a) return out;
+  for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) {
+    const k = ymd(d), wd = d.getDay();
+    if (wd !== 0 && wd !== 6 && holidayName(k)) out.push({ date: k, name: holidayName(k) });
+  }
+  return out;
+}
+/* 근무일 수 — 주말과 공휴일은 연차를 쓰지 않는다 */
+function countWorkdays(s, e) {
   const a = parseD(s), b = parseD(e); if (!a || !b || b < a) return 0;
-  let n = 0, d = new Date(a);
-  while (d <= b) { const wd = d.getDay(); if (wd !== 0 && wd !== 6) n++; d.setDate(d.getDate() + 1); }
+  let n = 0;
+  for (let d = new Date(a); d <= b; d.setDate(d.getDate() + 1)) if (!isOffDay(ymd(d))) n++;
   return n;
 }
 function applyDaysRecalc() {
   const type = $('ap-type').value, s = $('ap-start').value;
   const half = HALF_TYPES.includes(type);
   const e = half ? s : $('ap-end').value;
-  const days = half ? (s ? 0.5 : 0) : countWeekdays(s, e);
+  let days = half ? (s ? 0.5 : 0) : countWorkdays(s, e), note = '';
+  if (half && s && isOffDay(s)) {
+    days = 0;
+    note = ' (주말·공휴일은 신청할 수 없습니다' + (holidayName(s) ? ': ' + holidayName(s) : '') + ')';
+  } else if (!half && s && e) {
+    const h = holidaysOnWeekdays(s, e);
+    if (h.length) note = ' (공휴일 ' + h.length + '일 제외: ' + h.map(x => x.name).join(', ') + ')';
+  }
   $('ap-days-view').textContent = days;
+  $('ap-hol-note').textContent = note;
   const remain = ME.hire_date ? remainingDays(ME) : null;
   $('ap-remain-view').textContent = remain == null ? '-' : remain;
 }
@@ -354,8 +444,9 @@ function submitApply() {
   const end = half ? start : $('ap-end').value;
   if (!start || !end) return alert('날짜를 입력해주세요.');
   if (end < start) return alert('종료일이 시작일보다 빠를 수 없습니다.');
-  const days = half ? 0.5 : countWeekdays(start, end);
-  if (days <= 0) return alert('평일이 포함된 기간을 선택해주세요.');
+  if (half && isOffDay(start)) return alert('주말·공휴일에는 반차를 신청할 수 없습니다.' + (holidayName(start) ? '\n(' + holidayName(start) + ')' : ''));
+  const days = half ? 0.5 : countWorkdays(start, end);
+  if (days <= 0) return alert('근무일(주말·공휴일 제외)이 포함된 기간을 선택해주세요.');
   const reason = $('ap-reason').value.trim();
 
   if (EDITING_LEAVE_ID) {
@@ -521,7 +612,8 @@ function calMove(d) {
 }
 function renderCalendar() {
   $('cal-title').textContent = `${CAL_Y}년 ${CAL_M + 1}월`;
-  $('cal-dow').innerHTML = ['일', '월', '화', '수', '목', '금', '토'].map(d => `<div class="cal-dow">${d}</div>`).join('');
+  $('cal-dow').innerHTML = ['일', '월', '화', '수', '목', '금', '토']
+    .map((d, i) => `<div class="cal-dow${i === 0 ? ' sun' : i === 6 ? ' sat' : ''}">${d}</div>`).join('');
   const first = new Date(CAL_Y, CAL_M, 1), startDow = first.getDay();
   const daysInMonth = new Date(CAL_Y, CAL_M + 1, 0).getDate();
   const cells = [];
@@ -530,15 +622,28 @@ function renderCalendar() {
   while (cells.length % 7 !== 0) cells.push(null);
   const approved = (DB.leaves || []).filter(l => l.status === '승인');
   const tday = today();
-  $('cal-grid').innerHTML = cells.map(d => {
+  $('cal-grid').innerHTML = cells.map((d, idx) => {
     if (!d) return `<div class="cal-cell other"></div>`;
     const dateStr = `${CAL_Y}-${pad(CAL_M + 1)}-${pad(d)}`;
-    const hits = approved.filter(l => dateStr >= l.startDate && dateStr <= l.endDate);
-    return `<div class="cal-cell${dateStr === tday ? ' today' : ''}">
+    const dow = idx % 7;                                  // 한 줄이 일요일부터 7칸이라 칸 번호로 요일을 안다
+    const hol = holidayName(dateStr);
+    const off = dow === 0 || dow === 6 || !!hol;
+    /* 휴가는 근무일에만 표시 — 주말·공휴일에 이름이 붙으면 그날도 쉬는 것처럼 보인다 */
+    const hits = off ? [] : approved.filter(l => dateStr >= l.startDate && dateStr <= l.endDate);
+    const cls = (dateStr === tday ? ' today' : '') + (hol ? ' hol' : '') + (dow === 0 ? ' sun' : dow === 6 ? ' sat' : '');
+    return `<div class="cal-cell${cls}">
       <div class="d">${d}</div>
+      ${hol ? `<span class="cal-hol" title="${esc(hol)}">${esc(hol)}</span>` : ''}
       ${hits.map(l => `<span class="cal-tag" title="${esc(l.requesterDept || '')} ${esc(l.requesterTitle || '')} ${esc(l.requesterName)} ${esc(l.type)}">${l.requesterDept ? esc(l.requesterDept) + ' · ' : ''}${esc(l.requesterName)}${l.requesterTitle ? ' ' + esc(l.requesterTitle) : ''}${HALF_TYPES.includes(l.type) ? '(' + esc(l.type[2]) + ')' : ''}</span>`).join('')}
     </div>`;
   }).join('');
+  /* 이번 달 휴일 목록(좁은 화면에서는 칸 안 이름이 잘리므로) + 예상 계산 안내 */
+  const H = holidaysOf(CAL_Y), ym = `${CAL_Y}-${pad(CAL_M + 1)}`;
+  const list = Object.keys(H.map).filter(k => k.slice(0, 7) === ym).sort();
+  $('cal-note').innerHTML = (list.length
+      ? '<b>이번 달 휴일</b> ' + list.map(k => `${+k.slice(8)}일 ${esc(H.map[k])}`).join(' · ')
+      : '이번 달에는 공휴일이 없습니다.')
+    + (H.estimated ? `<span class="est">※ ${CAL_Y}년 공휴일은 법정 기준으로 계산한 예상입니다. 임시공휴일은 포함되지 않았습니다.${H.noLunar ? ' (음력 명절은 반영되지 않았습니다)' : ''}</span>` : '');
 }
 
 /* ───────────────────────── 10. 승인 관리 ───────────────────────── */
