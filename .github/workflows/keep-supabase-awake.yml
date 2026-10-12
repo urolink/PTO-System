@@ -1,0 +1,43 @@
+# ══════════════════════════════════════════════════════════════
+#  Supabase 무료 플랜 자동 일시정지 방지
+#
+#  무료 프로젝트는 7일 동안 활동이 없으면 자동으로 일시정지(Pause)되어
+#  로그인·데이터 조회가 전부 안 된다. 하루 한 번 DB를 실제로 조회해서
+#  "활동 중"으로 유지한다.
+#
+#  - 쓰는 키는 config.js 에 이미 공개돼 있는 publishable(anon) 키다. 비밀값이 아니다.
+#  - 조회는 RLS 때문에 빈 목록([])이 오는 게 정상이다. 200 응답이면 성공.
+#  - 응답이 200이 아니면(= 이미 정지됐거나 장애) 작업이 실패 처리되어
+#    GitHub 가 저장소 관리자에게 실패 메일을 보낸다 → 정지됐다는 걸 바로 알 수 있다.
+#  - GitHub 는 저장소에 60일 넘게 변경(커밋)이 없으면 스케줄 실행을 자동으로 끈다.
+#    그 경우 Actions 탭에서 이 워크플로를 'Enable' 한 번 누르면 다시 켜진다.
+# ══════════════════════════════════════════════════════════════
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: '17 0 * * *'    # 매일 09:17 KST (정각을 피해 지연 방지)
+  workflow_dispatch:         # Actions 탭에서 수동 실행(테스트)도 가능
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Query the database
+        env:
+          SUPABASE_URL: https://znifpzkyyiyevqemdwjf.supabase.co
+          SUPABASE_KEY: sb_publishable_x-WbxXEDJrCFiv3TkZ_auA_K0aPLGHT
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /tmp/res.txt -w '%{http_code}' --max-time 30 \
+              "$SUPABASE_URL/rest/v1/ul_leaves?select=id&limit=1" \
+              -H "apikey: $SUPABASE_KEY" -H "Authorization: Bearer $SUPABASE_KEY") || code=000
+            echo "시도 $i: HTTP $code"
+            if [ "$code" = "200" ]; then echo "OK — Supabase 활동 기록됨"; exit 0; fi
+            sleep 20
+          done
+          echo "::error::Supabase 응답 이상(마지막 HTTP $code). 프로젝트가 일시정지됐을 수 있습니다 — 대시보드에서 Resume 하세요."
+          exit 1
